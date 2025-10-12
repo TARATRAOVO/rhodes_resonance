@@ -8,6 +8,60 @@
   const txtPlayer= document.getElementById('txtPlayer');
   const btnSend  = document.getElementById('btnSend');
   const playerHint = document.getElementById('playerHint');
+  const btnSettings = document.getElementById('btnSettings');
+  // Settings drawer elements
+  const drawer = document.getElementById('settingsDrawer');
+  const tabBtns = drawer ? Array.from(drawer.querySelectorAll('.tab')) : [];
+  const panes = drawer ? Array.from(drawer.querySelectorAll('.tabpane')) : [];
+  const btnCfgClose = drawer ? drawer.querySelector('#btnCfgClose') : null;
+  const btnCfgSave = drawer ? drawer.querySelector('#btnCfgSave') : null;
+  const btnCfgSaveRestart = drawer ? drawer.querySelector('#btnCfgSaveRestart') : null;
+  const btnCfgReset = drawer ? drawer.querySelector('#btnCfgReset') : null;
+  // Story controls
+  const stSceneName = drawer ? drawer.querySelector('#stSceneName') : null;
+  const stSceneTime = drawer ? drawer.querySelector('#stSceneTime') : null;
+  const stSceneWeather = drawer ? drawer.querySelector('#stSceneWeather') : null;
+  const stSceneDesc = drawer ? drawer.querySelector('#stSceneDesc') : null;
+  const stDetails = drawer ? drawer.querySelector('#stDetails') : null;
+  const stObjectives = drawer ? drawer.querySelector('#stObjectives') : null;
+  const stTbl = drawer ? drawer.querySelector('#stPositions') : null;
+  const stPosNameSel = drawer ? drawer.querySelector('#stPosNameSel') : null;
+  const stPosX = drawer ? drawer.querySelector('#stPosX') : null;
+  const stPosY = drawer ? drawer.querySelector('#stPosY') : null;
+  const btnAddDetail = drawer ? drawer.querySelector('#btnAddDetail') : null;
+  const btnAddObjective = drawer ? drawer.querySelector('#btnAddObjective') : null;
+  const btnAddPos = drawer ? drawer.querySelector('#btnAddPos') : null;
+  // Weapons controls
+  const wpTable = drawer ? drawer.querySelector('#wpTable') : null;
+  const btnAddWeapon = drawer ? drawer.querySelector('#btnAddWeapon') : null;
+  // Characters form
+  const chListEl = drawer ? drawer.querySelector('#chList') : null;
+  const btnAddChar = drawer ? drawer.querySelector('#btnAddChar') : null;
+  const btnDelChar = drawer ? drawer.querySelector('#btnDelChar') : null;
+  const chName = drawer ? drawer.querySelector('#chName') : null;
+  const chType = drawer ? drawer.querySelector('#chType') : null;
+  const chPersona = drawer ? drawer.querySelector('#chPersona') : null;
+  const chAppearance = drawer ? drawer.querySelector('#chAppearance') : null;
+  const chQuotes = drawer ? drawer.querySelector('#chQuotes') : null;
+  const btnAddQuote = drawer ? drawer.querySelector('#btnAddQuote') : null;
+  const chLvl = drawer ? drawer.querySelector('#chLvl') : null;
+  const chAC = drawer ? drawer.querySelector('#chAC') : null;
+  const chMaxHP = drawer ? drawer.querySelector('#chMaxHP') : null;
+  const chMove = drawer ? drawer.querySelector('#chMove') : null;
+  const chSTR = drawer ? drawer.querySelector('#chSTR') : null;
+  const chDEX = drawer ? drawer.querySelector('#chDEX') : null;
+  const chCON = drawer ? drawer.querySelector('#chCON') : null;
+  const chINT = drawer ? drawer.querySelector('#chINT') : null;
+  const chWIS = drawer ? drawer.querySelector('#chWIS') : null;
+  const chCHA = drawer ? drawer.querySelector('#chCHA') : null;
+  const chSkills = drawer ? drawer.querySelector('#chSkills') : null;
+  const chSaves = drawer ? drawer.querySelector('#chSaves') : null;
+  const btnAddSkill = drawer ? drawer.querySelector('#btnAddSkill') : null;
+  const btnAddSave = drawer ? drawer.querySelector('#btnAddSave') : null;
+  const chInvTable = drawer ? drawer.querySelector('#chInvTable') : null;
+  const chInvIdSel = drawer ? drawer.querySelector('#chInvIdSel') : null;
+  const chInvCount = drawer ? drawer.querySelector('#chInvCount') : null;
+  const btnAddInv = drawer ? drawer.querySelector('#btnAddInv') : null;
 
   let ws = null;
   let lastSeq = 0;
@@ -19,6 +73,13 @@
   const params = new URLSearchParams(location.search);
   const debugMode = params.get('debug') === '1' || params.get('debug') === 'true';
   let lastState = {};
+  // Settings editor state
+  let activeTab = 'story';
+  const cfg = { story: null, weapons: null, characters: null };
+  const original = { story: null, weapons: null, characters: null };
+  let chActiveName = '';
+  let chRelations = {};
+  const dirty = { story: false, weapons: false, characters: false };
 
   function setStatus(text) { statusEl.textContent = text; }
   function lineEl(html, cls='') {
@@ -362,4 +423,525 @@
   connectWS();
   // 初始化按钮状态（未知运行态 -> 拉一次 state）
   fetch('/api/state').then(r=>r.json()).then(st => { running = !!st.running; updateButtons(); if (st && st.state) renderHUD(st.state); }).catch(()=>{ updateButtons(); });
+
+  // ==== Settings drawer logic ====
+  function drawerOpen() {
+    if (!drawer) return;
+    drawer.classList.remove('hidden');
+    drawer.setAttribute('aria-hidden', 'false');
+  }
+  function drawerClose(force=false) {
+    if (!drawer) return;
+    if (!force && (dirty.story || dirty.weapons || dirty.characters)) {
+      if (!confirm('有未保存的更改，确定关闭？')) return;
+    }
+    drawer.classList.add('hidden');
+    drawer.setAttribute('aria-hidden', 'true');
+  }
+  function setActiveTab(name) {
+    activeTab = name;
+    for (const b of tabBtns) {
+      const on = b.getAttribute('data-tab') === name;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    }
+    for (const p of panes) {
+      const show = p.getAttribute('data-pane') === name;
+      p.classList.toggle('hidden', !show);
+    }
+  }
+  function markDirty(name) {
+    dirty[name] = true;
+  }
+
+  function clearListEdit(el) { if (!el) return; el.innerHTML = ''; }
+  function addListRow(el, value, onChange, onDelete) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = value || '';
+    inp.addEventListener('input', () => onChange(inp.value));
+    const del = document.createElement('button');
+    del.className = 'sm'; del.textContent = '删除';
+    del.onclick = onDelete;
+    row.appendChild(inp); row.appendChild(del);
+    el.appendChild(row);
+  }
+
+  function renderCharList(names) {
+    if (!chListEl) return;
+    chListEl.innerHTML = '';
+    names.forEach(nm => {
+      const it = document.createElement('div');
+      it.className = 'item' + (nm === chActiveName ? ' active' : '');
+      it.textContent = nm;
+      it.onclick = () => { selectChar(nm); };
+      chListEl.appendChild(it);
+    });
+  }
+
+  function selectChar(name) {
+    chActiveName = name;
+    renderCharList(Object.keys(cfg.characters||{}));
+    fillCharForm(name);
+  }
+
+  function ensureEntry(name) {
+    cfg.characters = cfg.characters || {};
+    if (!cfg.characters[name]) {
+      cfg.characters[name] = {
+        type: 'npc', persona: '', appearance: '', quotes: [],
+        dnd: { level:1, ac:10, max_hp:8, abilities:{STR:10,DEX:10,CON:10,INT:10,WIS:10,CHA:10}, proficient_skills:[], proficient_saves:[], move_speed:6 },
+        inventory: {}
+      };
+    }
+    return cfg.characters[name];
+  }
+
+  function fillCharForm(name) {
+    const entry = ensureEntry(name);
+    if (chName) chName.value = name;
+    if (chType) { chType.value = (entry.type||'npc'); }
+    if (chPersona) chPersona.value = entry.persona || '';
+    if (chAppearance) chAppearance.value = entry.appearance || '';
+    // quotes
+    if (chQuotes) {
+      chQuotes.innerHTML = '';
+      const arr = Array.isArray(entry.quotes) ? entry.quotes.slice() : (entry.quotes? [String(entry.quotes)]: []);
+      entry.quotes = arr;
+      arr.forEach((q, idx) => addListRow(chQuotes, q, v => { entry.quotes[idx] = v; markDirty('characters'); }, () => { entry.quotes.splice(idx,1); fillCharForm(name); markDirty('characters'); }));
+    }
+    const dnd = entry.dnd = Object.assign({ level:1, ac:10, max_hp:8, abilities:{}, proficient_skills:[], proficient_saves:[], move_speed:6 }, entry.dnd || {});
+    const ab = dnd.abilities = Object.assign({STR:10,DEX:10,CON:10,INT:10,WIS:10,CHA:10}, dnd.abilities || {});
+    if (chLvl) chLvl.value = dnd.level != null ? dnd.level : 1;
+    if (chAC) chAC.value = dnd.ac != null ? dnd.ac : 10;
+    if (chMaxHP) chMaxHP.value = dnd.max_hp != null ? dnd.max_hp : 8;
+    if (chMove) chMove.value = dnd.move_speed != null ? dnd.move_speed : (dnd.move_speed_steps != null ? dnd.move_speed_steps : 6);
+    if (chSTR) chSTR.value = ab.STR != null ? ab.STR : 10;
+    if (chDEX) chDEX.value = ab.DEX != null ? ab.DEX : 10;
+    if (chCON) chCON.value = ab.CON != null ? ab.CON : 10;
+    if (chINT) chINT.value = ab.INT != null ? ab.INT : 10;
+    if (chWIS) chWIS.value = ab.WIS != null ? ab.WIS : 10;
+    if (chCHA) chCHA.value = ab.CHA != null ? ab.CHA : 10;
+    // skills & saves
+    if (chSkills) {
+      chSkills.innerHTML = '';
+      const arr = Array.isArray(dnd.proficient_skills) ? dnd.proficient_skills.slice() : [];
+      dnd.proficient_skills = arr;
+      arr.forEach((s, idx) => addListRow(chSkills, s, v => { dnd.proficient_skills[idx] = String(v||'').toLowerCase(); markDirty('characters'); }, () => { dnd.proficient_skills.splice(idx,1); fillCharForm(name); markDirty('characters'); }));
+    }
+    if (chSaves) {
+      chSaves.innerHTML = '';
+      const arr = Array.isArray(dnd.proficient_saves) ? dnd.proficient_saves.slice() : [];
+      dnd.proficient_saves = arr;
+      arr.forEach((s, idx) => addListRow(chSaves, s, v => { dnd.proficient_saves[idx] = String(v||'').toUpperCase(); markDirty('characters'); }, () => { dnd.proficient_saves.splice(idx,1); fillCharForm(name); markDirty('characters'); }));
+    }
+    // inventory
+    if (chInvTable) {
+      const tbody = chInvTable.querySelector('tbody');
+      tbody.innerHTML = '';
+      const inv = entry.inventory = Object.assign({}, entry.inventory || {});
+      Object.entries(inv).forEach(([iid, cnt]) => {
+        const tr = document.createElement('tr');
+        const tdId = document.createElement('td');
+        const tdN = document.createElement('td');
+        const tdOp = document.createElement('td');
+        const inId = document.createElement('input'); inId.type='text'; inId.value=iid; inId.disabled=true; tdId.appendChild(inId);
+        const inN  = document.createElement('input'); inN.type='number'; inN.value=(cnt!=null? cnt:1); inN.addEventListener('input', ()=>{ inv[iid] = parseInt(inN.value||'1',10); markDirty('characters'); }); tdN.appendChild(inN);
+        const del = document.createElement('button'); del.className='sm'; del.textContent='删除'; del.onclick=()=>{ delete inv[iid]; fillCharForm(name); markDirty('characters'); };
+        tdOp.appendChild(del);
+        tr.appendChild(tdId); tr.appendChild(tdN); tr.appendChild(tdOp);
+        tbody.appendChild(tr);
+      });
+    }
+    // populate add-inventory select
+    try {
+      if (chInvIdSel) {
+        const weaponIds = Object.keys(cfg.weapons||{});
+        chInvIdSel.innerHTML = '';
+        const ph = document.createElement('option'); ph.value=''; ph.textContent='选择武器…'; chInvIdSel.appendChild(ph);
+        for (const wid of weaponIds) {
+          const opt = document.createElement('option'); opt.value=wid; opt.textContent=wid; chInvIdSel.appendChild(opt);
+        }
+      }
+    } catch {}
+  }
+
+  function renderStoryForm(data, stateSnap) {
+    original.story = JSON.parse(JSON.stringify(data || {}));
+    cfg.story = JSON.parse(JSON.stringify(data || {}));
+    dirty.story = false;
+    const scene = (cfg.story.scene = cfg.story.scene || {});
+    stSceneName.value = scene.name || '';
+    stSceneTime.value = scene.time || '';
+    stSceneWeather.value = scene.weather || '';
+    stSceneDesc.value = scene.description || '';
+    // details
+    const details = Array.isArray(scene.details) ? scene.details.slice() : [];
+    clearListEdit(stDetails);
+    details.forEach((val, idx) => addListRow(stDetails, val, v => { scene.details[idx] = v; markDirty('story'); }, () => {
+      scene.details.splice(idx,1); renderStoryForm(cfg.story, stateSnap); markDirty('story');
+    }));
+    scene.details = details;
+    // objectives
+    const objs = Array.isArray(scene.objectives) ? scene.objectives.slice() : [];
+    clearListEdit(stObjectives);
+    objs.forEach((val, idx) => addListRow(stObjectives, val, v => { scene.objectives[idx] = v; markDirty('story'); }, () => {
+      scene.objectives.splice(idx,1); renderStoryForm(cfg.story, stateSnap); markDirty('story');
+    }));
+    scene.objectives = objs;
+    // positions
+    const tbody = stTbl.querySelector('tbody');
+    tbody.innerHTML = '';
+    const pos = Object.assign({}, cfg.story.initial_positions || {});
+    // seed from state participants if empty
+    try {
+      if ((!pos || Object.keys(pos).length === 0) && stateSnap && stateSnap.participants) {
+        for (const nm of stateSnap.participants) {
+          const p = (stateSnap.positions||{})[nm] || [0,0];
+          pos[nm] = p;
+        }
+      }
+    } catch {}
+    cfg.story.initial_positions = pos;
+    Object.entries(pos).forEach(([name, arr]) => {
+      const tr = document.createElement('tr');
+      const tdN = document.createElement('td');
+      const tdX = document.createElement('td');
+      const tdY = document.createElement('td');
+      const tdOp = document.createElement('td');
+      const inN = document.createElement('input'); inN.type = 'text'; inN.value = name; inN.disabled = true;
+      const inX = document.createElement('input'); inX.type = 'number'; inX.value = (arr && arr[0] != null) ? arr[0] : 0;
+      const inY = document.createElement('input'); inY.type = 'number'; inY.value = (arr && arr[1] != null) ? arr[1] : 0;
+      inX.addEventListener('input', ()=>{ cfg.story.initial_positions[name] = [parseInt(inX.value||'0',10), parseInt(inY.value||'0',10)]; markDirty('story'); });
+      inY.addEventListener('input', ()=>{ cfg.story.initial_positions[name] = [parseInt(inX.value||'0',10), parseInt(inY.value||'0',10)]; markDirty('story'); });
+      const del = document.createElement('button'); del.className='sm'; del.textContent='删除'; del.onclick = ()=>{ delete cfg.story.initial_positions[name]; renderStoryForm(cfg.story, stateSnap); markDirty('story'); };
+      tdN.appendChild(inN); tdX.appendChild(inX); tdY.appendChild(inY); tdOp.appendChild(del);
+      tr.appendChild(tdN); tr.appendChild(tdX); tr.appendChild(tdY); tr.appendChild(tdOp);
+      tbody.appendChild(tr);
+    });
+    // Populate name select from existing characters (exclude already-present)
+    try {
+      if (stPosNameSel) {
+        const names = Object.keys(cfg.characters || {});
+        const used = new Set(Object.keys(cfg.story.initial_positions || {}));
+        stPosNameSel.innerHTML = '';
+        const placeholder = document.createElement('option'); placeholder.value=''; placeholder.textContent='选择角色…'; stPosNameSel.appendChild(placeholder);
+        for (const nm of names) {
+          if (used.has(nm)) continue;
+          const opt = document.createElement('option');
+          opt.value = nm; opt.textContent = nm;
+          stPosNameSel.appendChild(opt);
+        }
+      }
+    } catch {}
+  }
+
+  function renderWeaponsForm(data) {
+    original.weapons = JSON.parse(JSON.stringify(data || {}));
+    cfg.weapons = JSON.parse(JSON.stringify(data || {}));
+    dirty.weapons = false;
+    const tbody = wpTable.querySelector('tbody');
+    tbody.innerHTML = '';
+    const abilities = ['STR','DEX','CON','INT','WIS','CHA'];
+    const ids = Object.keys(cfg.weapons || {});
+    ids.forEach((id) => {
+      const item = cfg.weapons[id] || {};
+      const tr = document.createElement('tr');
+      // id
+      const tdId = document.createElement('td');
+      const inId = document.createElement('input'); inId.type='text'; inId.value=id; tdId.appendChild(inId);
+      inId.addEventListener('change', ()=>{
+        const newId = String(inId.value||'').trim();
+        const oldId = id;
+        if (!newId) { alert('ID 不能为空'); inId.value = oldId; return; }
+        if (newId === oldId) return;
+        if ((cfg.weapons||{})[newId]) { alert('已存在同名武器 ID'); inId.value = oldId; return; }
+        // rename in cfg.weapons
+        cfg.weapons[newId] = Object.assign({}, cfg.weapons[oldId] || {});
+        delete cfg.weapons[oldId];
+        // offer to update character inventories
+        try {
+          let ref = 0;
+          for (const [nm, ch] of Object.entries(cfg.characters || {})) {
+            const inv = (ch||{}).inventory || {};
+            if (inv[oldId] != null) ref++;
+          }
+          if (ref > 0 && confirm(`检测到有 ${ref} 个角色背包包含 ${oldId}，是否一并更新为 ${newId}？`)) {
+            for (const [nm, ch] of Object.entries(cfg.characters || {})) {
+              const inv = (ch||{}).inventory || {};
+              if (inv[oldId] != null) {
+                const count = inv[oldId] || 0;
+                inv[newId] = (inv[newId] || 0) + count;
+                delete inv[oldId];
+              }
+            }
+          }
+        } catch {}
+        markDirty('weapons');
+        // re-render to reflect sorted order and ids
+        renderWeaponsForm(cfg.weapons);
+      });
+      // label
+      const tdLabel = document.createElement('td');
+      const inLabel = document.createElement('input'); inLabel.type='text'; inLabel.value=(item.label||''); inLabel.addEventListener('input',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).label=inLabel.value; markDirty('weapons'); }); tdLabel.appendChild(inLabel);
+      // reach
+      const tdReach = document.createElement('td');
+      const inReach = document.createElement('input'); inReach.type='number'; inReach.value = (item.reach_steps!=null? item.reach_steps:1); inReach.addEventListener('input',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).reach_steps = parseInt(inReach.value||'1',10); markDirty('weapons'); }); tdReach.appendChild(inReach);
+      // ability
+      const tdAb = document.createElement('td');
+      const selAb = document.createElement('select'); abilities.forEach(ab=>{ const opt=document.createElement('option'); opt.value=ab; opt.textContent=ab; selAb.appendChild(opt); }); selAb.value=(String(item.ability||'STR').toUpperCase()); selAb.addEventListener('change',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).ability = selAb.value; markDirty('weapons'); }); tdAb.appendChild(selAb);
+      // damage expr
+      const tdDmg = document.createElement('td');
+      const inDmg = document.createElement('input'); inDmg.type='text'; inDmg.value=(item.damage_expr||''); inDmg.addEventListener('input',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).damage_expr=inDmg.value; markDirty('weapons'); }); tdDmg.appendChild(inDmg);
+      // prof
+      const tdProf = document.createElement('td');
+      const ck = document.createElement('input'); ck.type='checkbox'; ck.checked= !!item.proficient_default; ck.addEventListener('change',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).proficient_default = !!ck.checked; markDirty('weapons'); }); tdProf.appendChild(ck);
+      // ops
+      const tdOps = document.createElement('td');
+      const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.weapons[id]; renderWeaponsForm(cfg.weapons); markDirty('weapons'); };
+      tdOps.appendChild(btnDel);
+      tr.appendChild(tdId); tr.appendChild(tdLabel); tr.appendChild(tdReach); tr.appendChild(tdAb); tr.appendChild(tdDmg); tr.appendChild(tdProf); tr.appendChild(tdOps);
+      tbody.appendChild(tr);
+    });
+    // refresh characters inventory add-select (if visible)
+    try { if (chActiveName) fillCharForm(chActiveName); } catch {}
+  }
+
+  function renderCharactersForm(data) {
+    original.characters = JSON.parse(JSON.stringify(data || {}));
+    chRelations = JSON.parse(JSON.stringify((data||{}).relations || {}));
+    // exclude relations from editable set
+    const map = {};
+    Object.entries(data || {}).forEach(([k, v]) => { if (k !== 'relations') map[k] = v; });
+    cfg.characters = map;
+    dirty.characters = false;
+    const names = Object.keys(cfg.characters || {});
+    chActiveName = names[0] || '';
+    renderCharList(names);
+    if (chActiveName) fillCharForm(chActiveName);
+  }
+
+  async function loadAllConfigs() {
+    // Load latest configs and state snapshot for helpers
+    const [stRes, wpRes, chRes, stState] = await Promise.all([
+      fetch('/api/config/story').then(r=>r.json()).catch(()=>({data:{}})),
+      fetch('/api/config/weapons').then(r=>r.json()).catch(()=>({data:{}})),
+      fetch('/api/config/characters').then(r=>r.json()).catch(()=>({data:{}})),
+      fetch('/api/state').then(r=>r.json()).catch(()=>({state:null})),
+    ]);
+    lastState = (stState||{}).state || lastState || {};
+    renderCharactersForm((chRes||{}).data||{});
+    renderStoryForm((stRes||{}).data||{}, lastState);
+    renderWeaponsForm((wpRes||{}).data||{});
+  }
+
+  function storyCollect() {
+    // update scene fields from inputs
+    const s = (cfg.story.scene = cfg.story.scene || {});
+    s.name = (stSceneName.value || '').trim();
+    s.time = (stSceneTime.value || '').trim();
+    s.weather = (stSceneWeather.value || '').trim();
+    s.description = (stSceneDesc.value || '').trim();
+    // lists already bound; ensure arrays exist
+    s.details = Array.isArray(s.details) ? s.details : [];
+    s.objectives = Array.isArray(s.objectives) ? s.objectives : [];
+    // positions bound via inputs; ensure ints
+    const pos = {};
+    for (const [k, v] of Object.entries(cfg.story.initial_positions || {})) {
+      try { pos[String(k)] = [parseInt(v[0],10)||0, parseInt(v[1],10)||0]; } catch { pos[String(k)] = [0,0]; }
+    }
+    const out = JSON.parse(JSON.stringify(original.story || {}));
+    out.scene = JSON.parse(JSON.stringify(s));
+    out.initial_positions = pos;
+    return out;
+  }
+
+  function weaponsCollect() {
+    const out = {};
+    // preserve unknown keys per weapon by merging original
+    const orig = original.weapons || {};
+    for (const id of Object.keys(cfg.weapons || {})) {
+      const src = cfg.weapons[id] || {};
+      const base = Object.assign({}, orig[id] || {});
+      base.label = (src.label || '').trim();
+      base.reach_steps = parseInt(src.reach_steps != null ? src.reach_steps : 1, 10) || 1;
+      base.ability = String(src.ability || 'STR').toUpperCase();
+      base.damage_expr = (src.damage_expr || '').trim();
+      base.proficient_default = !!src.proficient_default;
+      out[id] = base;
+    }
+    return out;
+  }
+
+  function charactersCollect() {
+    // Merge edited characters with preserved relations
+    const out = {};
+    for (const [name, entry] of Object.entries(cfg.characters || {})) {
+      out[name] = JSON.parse(JSON.stringify(entry || {}));
+      // normalize dnd.move_speed_steps alias to move_speed for file compatibility
+      const d = out[name].dnd || {};
+      if (d.move_speed_steps != null && d.move_speed == null) d.move_speed = d.move_speed_steps;
+      // ensure arrays are arrays
+      if (typeof out[name].quotes === 'string') out[name].quotes = [out[name].quotes];
+    }
+    out.relations = JSON.parse(JSON.stringify(chRelations || {}));
+    return out;
+  }
+
+  async function saveActive(restart) {
+    try {
+      let name = activeTab;
+      let data = null;
+      if (name === 'story') data = storyCollect();
+      else if (name === 'weapons') data = weaponsCollect();
+      else if (name === 'characters') data = charactersCollect();
+      const res = await fetch(`/api/config/${name}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(t || '保存失败');
+      }
+      dirty[name] = false;
+      if (restart) {
+        // mimic btnRestart behaviour
+        btnStart.disabled = true; btnStop.disabled = true; btnRestart.disabled = true;
+        try {
+          const r2 = await fetch('/api/restart', { method: 'POST' });
+          if (!r2.ok) throw new Error(await r2.text());
+          storyEl.innerHTML = '';
+          hudEl.innerHTML = '';
+          playerHint.textContent = '';
+          txtPlayer.value = '';
+          lastSeq = 0; waitingActor = ''; btnSend.disabled = true;
+          setStatus('restarting...');
+          try {
+            const st = await (await fetch('/api/state')).json();
+            if (st && st.state) renderHUD(st.state);
+            running = !!(st && st.running);
+          } catch {}
+          if (!ws) connectWS();
+          updateButtons();
+        } catch (e) {
+          alert('restart failed: ' + (e.message || e));
+        } finally {
+          btnRestart.disabled = false;
+        }
+      } else {
+        alert('已保存');
+      }
+    } catch (e) {
+      alert('保存失败: ' + (e.message || e));
+    }
+  }
+
+  // Wire events
+  if (btnSettings) btnSettings.onclick = async () => { setActiveTab('story'); drawerOpen(); await loadAllConfigs(); };
+  if (btnCfgClose) btnCfgClose.onclick = () => drawerClose(false);
+  if (btnCfgSave) btnCfgSave.onclick = () => saveActive(false);
+  if (btnCfgSaveRestart) btnCfgSaveRestart.onclick = () => saveActive(true);
+  if (btnCfgReset) btnCfgReset.onclick = async () => { await loadAllConfigs(); alert('已重置为服务器版本'); };
+  for (const b of tabBtns) {
+    b.onclick = () => setActiveTab(b.getAttribute('data-tab'));
+  }
+  if (btnAddDetail) btnAddDetail.onclick = () => { const scene = (cfg.story.scene = cfg.story.scene || {}); if (!Array.isArray(scene.details)) scene.details = []; scene.details.push(''); renderStoryForm(cfg.story, lastState || null); markDirty('story'); };
+  if (btnAddObjective) btnAddObjective.onclick = () => { const scene = (cfg.story.scene = cfg.story.scene || {}); if (!Array.isArray(scene.objectives)) scene.objectives = []; scene.objectives.push(''); renderStoryForm(cfg.story, lastState || null); markDirty('story'); };
+  if (btnAddPos) btnAddPos.onclick = () => {
+    const nm = stPosNameSel ? String(stPosNameSel.value||'').trim() : '';
+    const x = parseInt(stPosX.value||'0',10); const y = parseInt(stPosY.value||'0',10);
+    if (!nm) { alert('请选择角色'); return; }
+    cfg.story.initial_positions = cfg.story.initial_positions || {};
+    cfg.story.initial_positions[nm] = [x,y];
+    if (stPosNameSel) stPosNameSel.value=''; stPosX.value=''; stPosY.value='';
+    renderStoryForm(cfg.story, lastState || null); markDirty('story');
+  };
+  if (stPosNameSel) stPosNameSel.addEventListener('change', () => {
+    const nm = String(stPosNameSel.value||'').trim();
+    if (!nm) return;
+    try {
+      const p = (lastState && lastState.positions) ? lastState.positions[nm] : null;
+      if (Array.isArray(p) && p.length>=2) {
+        stPosX.value = String(p[0]);
+        stPosY.value = String(p[1]);
+      }
+    } catch {}
+  });
+  // Characters form events
+  if (btnAddChar) btnAddChar.onclick = () => {
+    const nm = prompt('输入新角色名称');
+    if (!nm) return;
+    const name = String(nm).trim();
+    if (!name) return;
+    if ((cfg.characters||{})[name]) { alert('已存在同名角色'); return; }
+    ensureEntry(name);
+    renderCharList(Object.keys(cfg.characters||{}));
+    selectChar(name);
+    // refresh story name select to include new role
+    renderStoryForm(cfg.story, lastState || null);
+    markDirty('characters');
+  };
+  if (btnDelChar) btnDelChar.onclick = () => {
+    if (!chActiveName) return;
+    if (!confirm(`确定删除 ${chActiveName} ？`)) return;
+    delete (cfg.characters||{})[chActiveName];
+    // cleanup relations entries referencing the deleted name
+    try {
+      delete chRelations[chActiveName];
+      for (const a of Object.keys(chRelations)) {
+        const m = chRelations[a] || {};
+        if (m[chActiveName] != null) delete m[chActiveName];
+      }
+    } catch {}
+    const names = Object.keys(cfg.characters||{});
+    chActiveName = names[0] || '';
+    renderCharList(names);
+    if (chActiveName) fillCharForm(chActiveName);
+    // refresh story name select to exclude removed role
+    renderStoryForm(cfg.story, lastState || null);
+    markDirty('characters');
+  };
+  if (chType) chType.addEventListener('change', ()=>{ if (!chActiveName) return; ensureEntry(chActiveName).type = chType.value; markDirty('characters'); });
+  if (chPersona) chPersona.addEventListener('input', ()=>{ if (!chActiveName) return; ensureEntry(chActiveName).persona = chPersona.value; markDirty('characters'); });
+  if (chAppearance) chAppearance.addEventListener('input', ()=>{ if (!chActiveName) return; ensureEntry(chActiveName).appearance = chAppearance.value; markDirty('characters'); });
+  if (btnAddQuote) btnAddQuote.onclick = ()=>{ if (!chActiveName) return; const e=ensureEntry(chActiveName); if (!Array.isArray(e.quotes)) e.quotes=[]; e.quotes.push(''); fillCharForm(chActiveName); markDirty('characters'); };
+  // dnd numeric & abilities
+  const bindNum = (el, set) => { if (!el) return; el.addEventListener('input', ()=>{ if (!chActiveName) return; set(); markDirty('characters'); }); };
+  bindNum(chLvl, ()=>{ ensureEntry(chActiveName).dnd.level = parseInt(chLvl.value||'1',10); });
+  bindNum(chAC, ()=>{ ensureEntry(chActiveName).dnd.ac = parseInt(chAC.value||'10',10); });
+  bindNum(chMaxHP, ()=>{ ensureEntry(chActiveName).dnd.max_hp = parseInt(chMaxHP.value||'8',10); });
+  bindNum(chMove, ()=>{ ensureEntry(chActiveName).dnd.move_speed = parseInt(chMove.value||'6',10); });
+  bindNum(chSTR, ()=>{ ensureEntry(chActiveName).dnd.abilities.STR = parseInt(chSTR.value||'10',10); });
+  bindNum(chDEX, ()=>{ ensureEntry(chActiveName).dnd.abilities.DEX = parseInt(chDEX.value||'10',10); });
+  bindNum(chCON, ()=>{ ensureEntry(chActiveName).dnd.abilities.CON = parseInt(chCON.value||'10',10); });
+  bindNum(chINT, ()=>{ ensureEntry(chActiveName).dnd.abilities.INT = parseInt(chINT.value||'10',10); });
+  bindNum(chWIS, ()=>{ ensureEntry(chActiveName).dnd.abilities.WIS = parseInt(chWIS.value||'10',10); });
+  bindNum(chCHA, ()=>{ ensureEntry(chActiveName).dnd.abilities.CHA = parseInt(chCHA.value||'10',10); });
+  if (btnAddSkill) btnAddSkill.onclick = ()=>{ if (!chActiveName) return; const d=ensureEntry(chActiveName).dnd; if (!Array.isArray(d.proficient_skills)) d.proficient_skills=[]; d.proficient_skills.push(''); fillCharForm(chActiveName); markDirty('characters'); };
+  if (btnAddSave) btnAddSave.onclick = ()=>{ if (!chActiveName) return; const d=ensureEntry(chActiveName).dnd; if (!Array.isArray(d.proficient_saves)) d.proficient_saves=[]; d.proficient_saves.push(''); fillCharForm(chActiveName); markDirty('characters'); };
+  if (btnAddInv) btnAddInv.onclick = ()=>{
+    if (!chActiveName) return;
+    const id = chInvIdSel ? String(chInvIdSel.value||'').trim() : '';
+    const n = parseInt(chInvCount.value||'1',10);
+    if (!id) { alert('请选择武器'); return; }
+    const e = ensureEntry(chActiveName);
+    const cur = e.inventory[id] || 0;
+    e.inventory[id] = (cur + (isNaN(n)? 0 : n > 0 ? n : 1));
+    if (chInvIdSel) chInvIdSel.value=''; chInvCount.value='';
+    fillCharForm(chActiveName); markDirty('characters');
+  };
+  if (stSceneName) stSceneName.addEventListener('input', ()=> markDirty('story'));
+  if (stSceneTime) stSceneTime.addEventListener('input', ()=> markDirty('story'));
+  if (stSceneWeather) stSceneWeather.addEventListener('input', ()=> markDirty('story'));
+  if (stSceneDesc) stSceneDesc.addEventListener('input', ()=> markDirty('story'));
+  if (btnAddWeapon) btnAddWeapon.onclick = () => {
+    // ask for id first; allow auto if empty
+    let id = String(prompt('输入武器 ID（可留空自动生成）')||'').trim();
+    if (!id) {
+      const base = 'weapon_'; let idx = 1; id = base+idx; while ((cfg.weapons||{})[id]) { idx++; id=base+idx; }
+    } else {
+      if ((cfg.weapons||{})[id]) { alert('已存在同名武器 ID'); return; }
+    }
+    (cfg.weapons||(cfg.weapons={}))[id] = { label:'', reach_steps:1, ability:'STR', damage_expr:'1d4+STR', proficient_default:false };
+    renderWeaponsForm(cfg.weapons); markDirty('weapons');
+  };
 })();

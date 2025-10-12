@@ -12,6 +12,7 @@
       <button id="btnRestart">Restart</button>
       <button id="btnStop" disabled>Stop</button>
       <span id="status" class="dim">idle</span>
+      <button id="btnSettings" style="float:right">设置</button>
     </header>
     <div class="wrap">
       <div class="col">
@@ -31,6 +32,176 @@
           <div id="playerHint" class="dim" style="margin-top:6px;font-size:13px;"></div>
         </div>
       </div>
+    </div>
+    <!-- Settings Drawer -->
+    <div id="settingsDrawer" class="drawer hidden" aria-hidden="true">
+      <div class="drawer-head">
+        <div class="tabs" role="tablist">
+          <button class="tab active" data-tab="story" role="tab" aria-selected="true">故事</button>
+          <button class="tab" data-tab="weapons" role="tab" aria-selected="false">武器</button>
+          <button class="tab" data-tab="characters" role="tab" aria-selected="false">角色</button>
+        </div>
+        <div class="ops">
+          <button id="btnCfgReset" class="ghost">重置</button>
+          <button id="btnCfgSave">保存</button>
+          <button id="btnCfgSaveRestart">保存并重启</button>
+          <button id="btnCfgClose" class="ghost">关闭</button>
+        </div>
+      </div>
+      <div class="drawer-body">
+        <!-- Story Tab -->
+        <div class="tabpane" data-pane="story">
+          <div class="grid2">
+            <div>
+              <label class="lbl">场景名</label>
+              <input id="stSceneName" type="text" />
+            </div>
+            <div>
+              <label class="lbl">时间</label>
+              <input id="stSceneTime" type="text" placeholder="08:00" />
+            </div>
+            <div>
+              <label class="lbl">天气</label>
+              <input id="stSceneWeather" list="weatherList" type="text" placeholder="overcast" />
+              <datalist id="weatherList">
+                <option value="sunny"></option>
+                <option value="overcast"></option>
+                <option value="rain"></option>
+                <option value="storm"></option>
+                <option value="snow"></option>
+              </datalist>
+            </div>
+          </div>
+          <div>
+            <label class="lbl">场景描述</label>
+            <textarea id="stSceneDesc" rows="3"></textarea>
+          </div>
+          <div class="grid2">
+            <div>
+              <label class="lbl">细节</label>
+              <div id="stDetails" class="list-edit"></div>
+              <button id="btnAddDetail" class="sm">+ 添加细节</button>
+            </div>
+            <div>
+              <label class="lbl">目标</label>
+              <div id="stObjectives" class="list-edit"></div>
+              <button id="btnAddObjective" class="sm">+ 添加目标</button>
+            </div>
+          </div>
+          <div>
+            <label class="lbl">初始坐标</label>
+            <table class="tbl" id="stPositions">
+              <thead><tr><th>名称</th><th>X</th><th>Y</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div>
+              <select id="stPosNameSel" style="width:14rem"></select>
+              <input id="stPosX" type="number" placeholder="X" style="width:6rem" />
+              <input id="stPosY" type="number" placeholder="Y" style="width:6rem" />
+              <button id="btnAddPos" class="sm">+ 添加坐标</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Weapons Tab -->
+        <div class="tabpane hidden" data-pane="weapons">
+          <table class="tbl" id="wpTable">
+            <thead>
+              <tr>
+                <th style="min-width:10rem">ID</th>
+                <th>名称</th>
+                <th>触及(步)</th>
+                <th>能力</th>
+                <th>伤害表达式</th>
+                <th>默认熟练</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <button id="btnAddWeapon" class="sm">+ 添加武器</button>
+        </div>
+
+        <!-- Characters Tab (表单化) -->
+        <div class="tabpane hidden" data-pane="characters">
+          <div class="grid2">
+            <div>
+              <label class="lbl">角色列表</label>
+              <div id="chList" class="vlist" style="height: 36vh; overflow:auto;"></div>
+              <div style="margin-top:6px; display:flex; gap:6px;">
+                <button id="btnAddChar" class="sm">+ 新增角色</button>
+                <button id="btnDelChar" class="sm">删除</button>
+              </div>
+            </div>
+            <div>
+              <label class="lbl">基础信息</label>
+              <div class="grid2">
+                <div>
+                  <label class="lbl">名称</label>
+                  <input id="chName" type="text" disabled />
+                </div>
+                <div>
+                  <label class="lbl">类型</label>
+                  <select id="chType">
+                    <option value="npc">npc</option>
+                    <option value="player">player</option>
+                  </select>
+                </div>
+              </div>
+              <label class="lbl">人设</label>
+              <textarea id="chPersona" rows="3"></textarea>
+              <label class="lbl">外观</label>
+              <textarea id="chAppearance" rows="3"></textarea>
+
+              <label class="lbl">口癖/台词</label>
+              <div id="chQuotes" class="list-edit"></div>
+              <button id="btnAddQuote" class="sm">+ 添加台词</button>
+
+              <label class="lbl">DnD 数值</label>
+              <div class="grid2">
+                <div><label class="lbl">等级</label><input id="chLvl" type="number" /></div>
+                <div><label class="lbl">AC</label><input id="chAC" type="number" /></div>
+              </div>
+              <div class="grid2">
+                <div><label class="lbl">最大HP</label><input id="chMaxHP" type="number" /></div>
+                <div><label class="lbl">移动(步/回合)</label><input id="chMove" type="number" /></div>
+              </div>
+              <div class="grid2">
+                <div><label class="lbl">STR</label><input id="chSTR" type="number" /></div>
+                <div><label class="lbl">DEX</label><input id="chDEX" type="number" /></div>
+                <div><label class="lbl">CON</label><input id="chCON" type="number" /></div>
+                <div><label class="lbl">INT</label><input id="chINT" type="number" /></div>
+                <div><label class="lbl">WIS</label><input id="chWIS" type="number" /></div>
+                <div><label class="lbl">CHA</label><input id="chCHA" type="number" /></div>
+              </div>
+              <div class="grid2">
+                <div>
+                  <label class="lbl">熟练技能</label>
+                  <div id="chSkills" class="list-edit"></div>
+                  <button id="btnAddSkill" class="sm">+ 添加技能</button>
+                </div>
+                <div>
+                  <label class="lbl">熟练豁免</label>
+                  <div id="chSaves" class="list-edit"></div>
+                  <button id="btnAddSave" class="sm">+ 添加豁免</button>
+                </div>
+              </div>
+
+              <label class="lbl">物品/背包</label>
+              <table class="tbl" id="chInvTable">
+                <thead><tr><th>Item ID</th><th>数量</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <div>
+                <select id="chInvIdSel" style="width:14rem"></select>
+                <input id="chInvCount" type="number" placeholder="数量" style="width:8rem" />
+                <button id="btnAddInv" class="sm">+ 添加物品</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="cfgHint" class="dim" style="padding:6px 10px; border-top:1px solid #1f2937;">保存后需重启生效。</div>
     </div>
     <script src="/app.js"></script>
   </body>
