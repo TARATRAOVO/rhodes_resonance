@@ -1,6 +1,7 @@
 (() => {
   const btnStart = document.getElementById('btnStart');
   const btnStop  = document.getElementById('btnStop');
+  const btnRestart = document.getElementById('btnRestart');
   const statusEl = document.getElementById('status');
   const storyEl  = document.getElementById('storyLines');
   const hudEl    = document.getElementById('hud');
@@ -14,6 +15,10 @@
   const maxDelay = 8000;
   const maxStory = 500;
   let waitingActor = '';
+  let running = false;
+  const params = new URLSearchParams(location.search);
+  const debugMode = params.get('debug') === '1' || params.get('debug') === 'true';
+  let lastState = {};
 
   function setStatus(text) { statusEl.textContent = text; }
   function lineEl(html, cls='') {
@@ -24,6 +29,13 @@
   }
   function esc(s) { return s.replace(/[<>&]/g, m => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[m])); }
   function scrollToBottom(el) { el.scrollTop = el.scrollHeight; }
+  function updateButtons() {
+    // Start 与 Restart：未运行时都可用；运行时 Start 禁用、Restart 可用
+    btnStart.disabled = running;
+    btnStop.disabled = !running;
+    btnRestart.disabled = false;
+    // Send 按钮仍由等待玩家输入信号控制
+  }
 
   function renderHUD(state) {
     hudEl.innerHTML = '';
@@ -40,6 +52,36 @@
       if (loc) kv.push(`<span class="pill">location: ${esc(loc)}</span>`);
       const timeMin = state.time_min;
       if (typeof timeMin === 'number') kv.push(`<span class="pill">time: ${String(Math.floor(timeMin/60)).padStart(2,'0')}:${String(timeMin%60).padStart(2,'0')}</span>`);
+      // 追加：目标状态
+      const objs = Array.isArray(state.objectives) ? state.objectives : [];
+      const objStatus = (state.objective_status || {});
+      for (const o of objs.slice(0, 6)) {
+        const st = String(objStatus[o] || 'pending');
+        const label = st === 'done' ? '✓' : (st === 'blocked' ? '✗' : '…');
+        kv.push(`<span class="pill">${esc(o)}:${label}</span>`);
+      }
+      // 追加：紧张度/标记
+      if (typeof state.tension === 'number') kv.push(`<span class="pill">tension: ${state.tension}</span>`);
+      if (Array.isArray(state.marks) && state.marks.length) kv.push(`<span class="pill">marks: ${state.marks.length}</span>`);
+      // 追加：每个参与者的 HP 与坐标
+      const chars = state.characters || {};
+      const pos = state.positions || {};
+      if (Array.isArray(state.participants)) {
+        for (const nm of state.participants) {
+          const st = chars[nm] || {};
+          const hp = (st.hp != null && st.max_hp != null) ? `HP ${st.hp}/${st.max_hp}` : '';
+          const dying = (st.dying_turns_left != null) ? `濒死${st.dying_turns_left}` : '';
+          const coord = Array.isArray(pos[nm]) && pos[nm].length>=2 ? `@(${pos[nm][0]},${pos[nm][1]})` : '';
+          const bits = [nm, hp, dying, coord].filter(Boolean).join(' ');
+          if (bits) kv.push(`<span class="pill">${esc(bits)}</span>`);
+        }
+      }
+      // 追加：守护关系
+      const guards = state.guardians || {};
+      try {
+        const pairs = Object.entries(guards).slice(0, 6).map(([k,v])=>`${k}->${v}`);
+        if (pairs.length) kv.push(`<span class="pill">guard: ${esc(pairs.join(' | '))}</span>`);
+      } catch {}
     } catch {}
     hudEl.innerHTML = kv.join(' ');
   }
@@ -48,21 +90,42 @@
     const t = ev.event_type;
     lastSeq = Math.max(lastSeq, ev.sequence || 0);
     if (t === 'state_update') {
+      // 合并状态：既支持快照（state），也兼容 turn-state 的局部字段
       const st = ev.state || (ev.data && ev.data.state) || null;
-      renderHUD(st);
+      if (st && typeof st === 'object') {
+        lastState = st;
+      } else {
+        // 可能是 turn-state：positions/in_combat/reaction_available
+        const d = ev.data || {};
+        if (Object.keys(d).length) {
+          lastState = Object.assign({}, lastState);
+          if (d.positions) lastState.positions = d.positions;
+          if (typeof d.in_combat === 'boolean') lastState.in_combat = d.in_combat;
+          if (d.reaction_available) lastState.reaction_available = d.reaction_available;
+        }
+      }
+      renderHUD(lastState);
       return;
     }
-    // 精简叙事：只展示玩家/NPC对白；系统或上下文、回合提示等全部隐藏
+    // 精简叙事：展示对白；仅隐藏上下文/回合横幅/世界概要
     if (t === 'narrative') {
       const phase = String(ev.phase || '');
       if (phase.startsWith('context:') || phase === 'round-start' || phase === 'world-summary') return;
       const actor = ev.actor || '';
       const raw = (ev.text || (ev.data && ev.data.text) || '').toString();
-      if (!phase.startsWith('npc:') && !phase.startsWith('player:')) {
-        // 非对白（例如 Host 提示）一律忽略，保持简洁
-        return;
-      }
-      const row = lineEl(`<span class="actor">${esc(actor)}:</span> ${esc(raw)}`, 'narrative');
+      // 过滤叙事中的“理由/行动理由：...”段落，并将多行合并为单行
+      const stripRationale = (s) => {
+        if (!s) return '';
+        let t = String(s);
+        // 去掉结尾的“理由/行动理由：.../reason: ...”
+        t = t.replace(/\s*(?:行动)?(?:理由|reason|Reason)[:：][\s\S]*$/, '');
+        // 去掉仅包含理据的一整行
+        if (/^(?:行动)?(?:理由|reason|Reason)[:：]/.test(t.trim())) return '';
+        return t.trim();
+      };
+      const cleaned = raw.split(/\n+/).map(stripRationale).filter(Boolean).join(' ');
+      if (!cleaned) return;
+      const row = lineEl(`<span class="actor">${esc(actor)}:</span> ${esc(cleaned)}`, 'narrative');
       storyEl.appendChild(row);
       if (storyEl.children.length > maxStory) storyEl.removeChild(storyEl.firstChild);
       scrollToBottom(storyEl.parentElement);
@@ -127,11 +190,23 @@
           // 结果：优先展示文本块；若无文本则展示 metadata 的关键字段
           let textOut = '';
           try {
+            // 过滤“理由：...”等理据字段
+            const stripReason = (s) => {
+              if (!s) return s;
+              let t = String(s);
+              // 去掉结尾的“理由/行动理由：.../reason: ...”
+              t = t.replace(/\s*(?:行动)?(?:理由|reason|Reason)[:：][\s\S]*$/,'');
+              // 去掉单独一段“理由/行动理由：...”行
+              if (/^(?:行动)?(?:理由|reason|Reason)[:：]/.test(t.trim())) return '';
+              return t.trim();
+            };
             if (Array.isArray(texts) && texts.length) {
-              textOut = texts.join(' ');
+              const cleaned = texts.map(stripReason).filter(Boolean);
+              textOut = cleaned.join(' ');
             } else if (meta && typeof meta === 'object') {
               const keys = Object.keys(meta).slice(0, 4);
               textOut = keys.map(k => `${k}=${typeof meta[k]==='object'? JSON.stringify(meta[k]): String(meta[k])}`).join(' ');
+              textOut = stripReason(textOut);
             }
           } catch {}
           const line = lineEl(`<span class="actor">${esc(actor)}</span> 结果 <b>${esc(label)}</b>${textOut ? ' · ' + esc(textOut) : ''}`);
@@ -163,23 +238,35 @@
         if (obj.type === 'hello') {
           if (typeof obj.last_sequence === 'number') lastSeq = Math.max(lastSeq, obj.last_sequence);
           if (obj.state) renderHUD(obj.state);
+          // 查询一次运行状态，刷新按钮
+          fetch('/api/state').then(r=>r.json()).then(st => { running = !!st.running; updateButtons(); if (running) setStatus('running'); }).catch(()=>{});
           return;
         }
         if (obj.type === 'event' && obj.event) {
+          if (debugMode) { try { console.debug('EVT', obj.event); } catch {} }
           handleEvent(obj.event);
+          if (running) setStatus('running');
           // 如果是等待玩家输入的信号，提示一下，并开启发送按钮
           try {
-            const ev = obj.event; if (ev && ev.event_type === 'system' && ev.phase === 'player_input') {
-              waitingActor = String(ev.actor || '');
-              playerHint.textContent = waitingActor ? `等待 ${waitingActor} 输入...` : '等待玩家输入...';
-              btnSend.disabled = !waitingActor;
-              if (waitingActor) txtPlayer.focus();
+            const ev = obj.event;
+            if (ev && ev.event_type === 'system') {
+              if (ev.phase === 'player_input') {
+                waitingActor = String(ev.actor || '');
+                playerHint.textContent = waitingActor ? `等待 ${waitingActor} 输入...` : '等待玩家输入...';
+                btnSend.disabled = !waitingActor;
+                if (waitingActor) txtPlayer.focus();
+              } else if (ev.phase === 'player_input_end') {
+                waitingActor = '';
+                btnSend.disabled = true;
+                playerHint.textContent = '';
+              }
             }
           } catch {}
           return;
         }
         if (obj.type === 'end') {
           setStatus('finished');
+          running = false; updateButtons();
           return;
         }
       } catch (e) {}
@@ -203,9 +290,9 @@
     btnStart.disabled = true;
     try {
       await postJSON('/api/start');
-      btnStop.disabled = false;
+      running = true; updateButtons(); setStatus('running');
       if (!ws) connectWS();
-      setStatus('starting...');
+      // 已进入运行态
     } catch (e) {
       btnStart.disabled = false;
       alert('start failed: ' + (e.message || e));
@@ -220,7 +307,34 @@
     } catch (e) {
       alert('stop failed: ' + (e.message || e));
     } finally {
-      btnStart.disabled = false;
+      running = false; updateButtons();
+    }
+  };
+
+  btnRestart.onclick = async () => {
+    btnStart.disabled = true; btnStop.disabled = true; btnRestart.disabled = true;
+    try {
+      const res = await fetch('/api/restart', { method: 'POST' });
+      if (!res.ok) throw new Error(await res.text());
+      // UI 清空到初始状态
+      storyEl.innerHTML = '';
+      hudEl.innerHTML = '';
+      playerHint.textContent = '';
+      txtPlayer.value = '';
+      lastSeq = 0; waitingActor = ''; btnSend.disabled = true;
+      setStatus('restarting...');
+      // 刷新一下状态
+      try {
+        const st = await (await fetch('/api/state')).json();
+        if (st && st.state) renderHUD(st.state);
+        running = !!(st && st.running);
+      } catch {}
+      if (!ws) connectWS();
+      updateButtons();
+    } catch (e) {
+      alert('restart failed: ' + (e.message || e));
+    } finally {
+      btnRestart.disabled = false;
     }
   };
 
@@ -246,4 +360,6 @@
 
   // connect on load to receive any state before clicking Start
   connectWS();
+  // 初始化按钮状态（未知运行态 -> 拉一次 state）
+  fetch('/api/state').then(r=>r.json()).then(st => { running = !!st.running; updateButtons(); if (st && st.state) renderHUD(st.state); }).catch(()=>{ updateButtons(); });
 })();
