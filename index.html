@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NPC Talk Demo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header>
+      <button id="btnStart">Start</button>
+      <button id="btnStop" disabled>Stop</button>
+      <span id="status" class="dim">idle</span>
+    </header>
+    <div class="wrap">
+      <div class="col">
+        <div class="panel" id="story"><h3 class="h">故事</h3><div id="storyLines"></div></div>
+      </div>
+      <div class="col side">
+        <div class="panel mb">
+          <h3 class="h">状态</h3>
+          <div class="kv" id="hud"></div>
+        </div>
+        <div class="panel mb">
+          <h3 class="h">玩家输入</h3>
+          <div class="kv" style="gap:6px 8px; align-items:center; width:100%;">
+            <input id="txtPlayer" type="text" placeholder="输入对白…（轮到玩家回合时可发送）" style="flex:1;min-width:12rem;padding:6px 8px;border-radius:4px;border:1px solid #1f2937;background:#0b1220;color:#e6e6e6;" />
+            <button id="btnSend" disabled>Send</button>
+          </div>
+          <div id="playerHint" class="dim" style="margin-top:6px;font-size:13px;"></div>
+        </div>
+      </div>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>
