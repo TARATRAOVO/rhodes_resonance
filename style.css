@@ -38,3 +38,7 @@ button[disabled]{ background:#374151; cursor:not-allowed; }
 .vlist { display:flex; flex-direction:column; gap:4px; }
 .vlist .item { padding:6px 8px; border:1px solid #1f2937; background:#0f172a; border-radius:4px; cursor:pointer; }
 .vlist .item.active { background:#1f2937; }
+
+/* Battle map */
+#mapWrap { height: 360px; border:1px solid #1f2937; border-radius:4px; background:#0b1220; }
+#mapCanvas { width:100%; height:100%; display:block; }

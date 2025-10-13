@@ -9,6 +9,9 @@
   const btnSend  = document.getElementById('btnSend');
   const playerHint = document.getElementById('playerHint');
   const btnSettings = document.getElementById('btnSettings');
+  // Map elements
+  const mapCanvas = document.getElementById('mapCanvas');
+  const mapHint = document.getElementById('mapHint');
   // Settings drawer elements
   const drawer = document.getElementById('settingsDrawer');
   const tabBtns = drawer ? Array.from(drawer.querySelectorAll('.tab')) : [];
@@ -73,6 +76,144 @@
   const params = new URLSearchParams(location.search);
   const debugMode = params.get('debug') === '1' || params.get('debug') === 'true';
   let lastState = {};
+
+  // ==== Simple Battle Map (static, no interaction/animation) ====
+  const MapView = (() => {
+    function hashHue(s) {
+      let h = 0 >>> 0;
+      for (let i = 0; i < s.length; i++) h = (((h << 5) - h) + s.charCodeAt(i)) >>> 0; // 31x
+      return h % 360;
+    }
+    function nameColor(nm) { return `hsl(${hashHue(String(nm||''))},60%,60%)`; }
+    class MapView {
+      constructor(canvas, hint) {
+        this.canvas = canvas;
+        this.hint = hint;
+        this.ctx = canvas ? canvas.getContext('2d') : null;
+        this.dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
+        this.bounds = null; // {minX,maxX,minY,maxY}
+        this._lastState = null;
+        this.resize();
+      }
+      resize() {
+        if (!this.canvas || !this.ctx) return;
+        const cw = this.canvas.clientWidth || 0;
+        const ch = this.canvas.clientHeight || 0;
+        const dpr = this.dpr || 1;
+        if (cw <= 0 || ch <= 0) return;
+        if (this.canvas.width !== Math.floor(cw * dpr) || this.canvas.height !== Math.floor(ch * dpr)) {
+          this.canvas.width = Math.floor(cw * dpr);
+          this.canvas.height = Math.floor(ch * dpr);
+        }
+        this.ctx.setTransform(1,0,0,1,0,0);
+        this.ctx.scale(dpr, dpr);
+        this.render(this._lastState || null);
+      }
+      _computeBounds(pos) {
+        let minX=Infinity, maxX=-Infinity, minY=Infinity, maxY=-Infinity;
+        let has=false;
+        for (const [nm, p] of Object.entries(pos||{})) {
+          if (!Array.isArray(p) || p.length < 2) continue;
+          const x = parseInt(p[0], 10); const y = parseInt(p[1], 10);
+          if (!isFinite(x) || !isFinite(y)) continue;
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          has = true;
+        }
+        if (!has) return null;
+        if (minX === Infinity || minY === Infinity) return null;
+        // pad box to avoid touching edges; also ensure non-zero span
+        if (minX === maxX) { minX -= 2; maxX += 2; }
+        if (minY === maxY) { minY -= 2; maxY += 2; }
+        return { minX, maxX, minY, maxY };
+      }
+      _clear() {
+        if (!this.canvas || !this.ctx) return;
+        const w = this.canvas.clientWidth || 0;
+        const h = this.canvas.clientHeight || 0;
+        this.ctx.fillStyle = '#0b1220';
+        this.ctx.fillRect(0, 0, w, h);
+      }
+      _drawGrid(bounds, stepPx) {
+        const ctx = this.ctx; if (!ctx) return;
+        const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+        const pad = 24; // px
+        const originX = pad - bounds.minX * stepPx;
+        const originY = pad - bounds.minY * stepPx;
+        // choose grid density
+        const gap = stepPx >= 24 ? 1 : stepPx >= 12 ? 2 : stepPx >= 6 ? 5 : 10;
+        ctx.save();
+        ctx.strokeStyle = '#1f2937';
+        ctx.lineWidth = 1;
+        // verticals
+        const startX = Math.floor(bounds.minX / gap) * gap;
+        const endX = Math.ceil(bounds.maxX / gap) * gap;
+        for (let gx = startX; gx <= endX; gx += gap) {
+          const x = originX + gx * stepPx;
+          if (x < pad-1 || x > w - pad + 1) continue;
+          ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, h - pad); ctx.stroke();
+        }
+        // horizontals
+        const startY = Math.floor(bounds.minY / gap) * gap;
+        const endY = Math.ceil(bounds.maxY / gap) * gap;
+        for (let gy = startY; gy <= endY; gy += gap) {
+          const y = originY + gy * stepPx;
+          if (y < pad-1 || y > h - pad + 1) continue;
+          ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - pad, y); ctx.stroke();
+        }
+        ctx.restore();
+      }
+      _drawActors(state, bounds, stepPx) {
+        const ctx = this.ctx; if (!ctx) return;
+        const pad = 24;
+        const originX = pad - bounds.minX * stepPx;
+        const originY = pad - bounds.minY * stepPx;
+        const pos = state.positions || {};
+        const radius = Math.max(3, Math.min(6, stepPx * 0.35));
+        ctx.save();
+        ctx.font = '12px ui-monospace, Menlo, monospace';
+        ctx.textBaseline = 'middle';
+        for (const nm of Object.keys(pos)) {
+          const p = pos[nm]; if (!Array.isArray(p) || p.length < 2) continue;
+          const x = originX + parseInt(p[0],10) * stepPx;
+          const y = originY + parseInt(p[1],10) * stepPx;
+          const c = nameColor(nm);
+          ctx.fillStyle = c; ctx.strokeStyle = '#0b0e14';
+          ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI*2); ctx.fill();
+          ctx.stroke();
+          // label (name only)
+          ctx.fillStyle = '#e6e6e6';
+          ctx.fillText(String(nm), x + radius + 4, y);
+        }
+        ctx.restore();
+      }
+      render(state) {
+        this._lastState = state || this._lastState || {};
+        if (!this.canvas || !this.ctx) return;
+        this._clear();
+        const w = this.canvas.clientWidth || 0;
+        const h = this.canvas.clientHeight || 0;
+        if (w <= 0 || h <= 0) return;
+        const positions = (state && state.positions) || (this._lastState && this._lastState.positions) || {};
+        const b = this._computeBounds(positions);
+        if (!b) {
+          if (this.hint) this.hint.textContent = '暂无坐标';
+          return;
+        }
+        if (this.hint) this.hint.textContent = '';
+        const pad = 24;
+        const spanX = (b.maxX - b.minX + 1);
+        const spanY = (b.maxY - b.minY + 1);
+        const stepPx = Math.max(6, Math.min((w - pad*2) / spanX, (h - pad*2) / spanY));
+        this._drawGrid(b, stepPx);
+        this._drawActors(this._lastState || {}, b, stepPx);
+      }
+      update(state) { this.render(state); }
+    }
+    return MapView;
+  })();
+
+  const mapView = (mapCanvas && mapCanvas.getContext) ? new MapView(mapCanvas, mapHint) : null;
   // Settings editor state
   let activeTab = 'story';
   const cfg = { story: null, weapons: null, characters: null };
@@ -166,6 +307,7 @@
         }
       }
       renderHUD(lastState);
+      if (mapView) mapView.update(lastState);
       return;
     }
     // 精简叙事：展示对白；仅隐藏上下文/回合横幅/世界概要
@@ -298,7 +440,7 @@
         const obj = JSON.parse(m.data);
         if (obj.type === 'hello') {
           if (typeof obj.last_sequence === 'number') lastSeq = Math.max(lastSeq, obj.last_sequence);
-          if (obj.state) renderHUD(obj.state);
+          if (obj.state) { renderHUD(obj.state); if (mapView) mapView.update(obj.state); }
           // 查询一次运行状态，刷新按钮
           fetch('/api/state').then(r=>r.json()).then(st => { running = !!st.running; updateButtons(); if (running) setStatus('running'); }).catch(()=>{});
           return;
@@ -387,7 +529,7 @@
       // 刷新一下状态
       try {
         const st = await (await fetch('/api/state')).json();
-        if (st && st.state) renderHUD(st.state);
+        if (st && st.state) { renderHUD(st.state); if (mapView) mapView.update(st.state); }
         running = !!(st && st.running);
       } catch {}
       if (!ws) connectWS();
@@ -419,10 +561,17 @@
   btnSend.onclick = sendPlayer;
   txtPlayer.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendPlayer(); });
 
+  // handle window resize for map
+  if (mapView) {
+    window.addEventListener('resize', () => mapView.resize());
+    // initial sizing in case canvas mounted before script
+    setTimeout(()=> mapView.resize(), 0);
+  }
+
   // connect on load to receive any state before clicking Start
   connectWS();
   // 初始化按钮状态（未知运行态 -> 拉一次 state）
-  fetch('/api/state').then(r=>r.json()).then(st => { running = !!st.running; updateButtons(); if (st && st.state) renderHUD(st.state); }).catch(()=>{ updateButtons(); });
+  fetch('/api/state').then(r=>r.json()).then(st => { running = !!st.running; updateButtons(); if (st && st.state) { renderHUD(st.state); if (mapView) mapView.update(st.state); } }).catch(()=>{ updateButtons(); });
 
   // ==== Settings drawer logic ====
   function drawerOpen() {
