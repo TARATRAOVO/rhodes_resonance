@@ -29,7 +29,18 @@
     </header>
     <div class="wrap">
       <div class="col">
-        <div class="panel" id="story"><h3 class="h">战术日志</h3><div id="storyLines"></div></div>
+        <div class="panel" id="story">
+          <h3 class="h">战术日志</h3>
+          <div id="storyLines"></div>
+          <div id="cmdBar" class="cmd-bar">
+            <div class="row cli-row">
+              <span class="prompt" id="cmdPrompt">&gt;</span>
+              <input id="txtPlayer" type="text" placeholder="输入指令/对白…（轮到你时可发送）" />
+              <button id="btnSend" disabled>发送</button>
+            </div>
+            <div id="playerHint" class="dim"></div>
+          </div>
+        </div>
       </div>
       <div class="col side">
         <div class="panel mb" id="statusPanel">
@@ -41,14 +52,7 @@
           <div id="mapWrap"><canvas id="mapCanvas"></canvas></div>
           <div id="mapHint" class="dim" style="font-size:12px;margin-top:4px;"></div>
         </div>
-        <div class="panel mb" id="inputPanel">
-          <h3 class="h">指挥官指令</h3>
-          <div class="kv" style="gap:6px 8px; align-items:center; width:100%;">
-            <input id="txtPlayer" type="text" placeholder="输入指令/对白…（轮到你时可发送）" />
-            <button id="btnSend" disabled>发送</button>
-          </div>
-          <div id="playerHint" class="dim" style="margin-top:6px;font-size:13px;"></div>
-        </div>
+        
       </div>
     </div>
     <!-- Settings Drawer -->

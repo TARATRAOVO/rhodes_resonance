@@ -9,10 +9,12 @@
   const btnSend  = document.getElementById('btnSend');
   const playerHint = document.getElementById('playerHint');
   const btnSettings = document.getElementById('btnSettings');
+  const cmdPrompt = document.getElementById('cmdPrompt');
   const btnToggleSide = document.getElementById('btnToggleSide');
   // Map elements
   const mapCanvas = document.getElementById('mapCanvas');
   const mapHint = document.getElementById('mapHint');
+  const mapWrapEl = document.getElementById('mapWrap');
   // Settings drawer elements
   const drawer = document.getElementById('settingsDrawer');
   const tabBtns = drawer ? Array.from(drawer.querySelectorAll('.tab')) : [];
@@ -73,6 +75,9 @@
   const maxDelay = 8000;
   const maxStory = 500;
   let waitingActor = '';
+  // simple command history for CLI experience
+  const cmdHist = [];
+  let cmdIdx = -1; // points to next insert position
   let running = false;
   const params = new URLSearchParams(location.search);
   const debugMode = params.get('debug') === '1' || params.get('debug') === 'true';
@@ -230,7 +235,16 @@
   })();
 
   const mapView = (mapCanvas && mapCanvas.getContext) ? new MapView(mapCanvas, mapHint) : null;
-  if (mapView) window.addEventListener('resize', () => mapView.resize());
+  if (mapView) {
+    window.addEventListener('resize', () => mapView.resize());
+    // ResizeObserver fixes distortion when the container resizes without a window resize
+    try {
+      if (window.ResizeObserver && mapWrapEl) {
+        const ro = new ResizeObserver(() => mapView.resize());
+        ro.observe(mapWrapEl);
+      }
+    } catch {}
+  }
   // Settings editor state
   let activeTab = 'story';
   const cfg = { story: null, weapons: null, characters: null };
@@ -243,7 +257,8 @@
   function lineEl(html, cls='') {
     const div = document.createElement('div');
     div.className = `line ${cls}`;
-    div.innerHTML = html;
+    // Wrap content to be a single grid item so grid layout doesn't split text per element
+    div.innerHTML = `<div class="content">${html}</div>`;
     return div;
   }
   function esc(s) { return s.replace(/[<>&]/g, m => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[m])); }
@@ -345,7 +360,7 @@
       };
       const cleaned = raw.split(/\n+/).map(stripRationale).filter(Boolean).join(' ');
       if (!cleaned) return;
-      const row = lineEl(`<span class="actor">${esc(actor)}:</span> ${esc(cleaned)}`, 'narrative');
+      const row = lineEl(`<span class="actor">${esc(actor)}:</span> ${esc(cleaned)}`, 'narrative out');
       storyEl.appendChild(row);
       if (storyEl.children.length > maxStory) storyEl.removeChild(storyEl.firstChild);
       scrollToBottom(storyEl.parentElement);
@@ -404,7 +419,7 @@
           } catch { return ''; }
         })();
         if (t === 'tool_call') {
-          const line = lineEl(`<span class="actor">${esc(actor)}</span> 发起 <b>${esc(label)}</b>${brief ? ' · ' + esc(brief) : ''}`);
+          const line = lineEl(`<span class="actor">${esc(actor)}</span> 发起 <b>${esc(label)}</b>${brief ? ' · ' + esc(brief) : ''}`, 'cmd');
           storyEl.appendChild(line);
         } else {
           // 结果：优先展示文本块；若无文本则展示 metadata 的关键字段
@@ -429,7 +444,7 @@
               textOut = stripReason(textOut);
             }
           } catch {}
-          const line = lineEl(`<span class="actor">${esc(actor)}</span> 结果 <b>${esc(label)}</b>${textOut ? ' · ' + esc(textOut) : ''}`);
+          const line = lineEl(`<span class="actor">${esc(actor)}</span> 结果 <b>${esc(label)}</b>${textOut ? ' · ' + esc(textOut) : ''}`, 'out');
           storyEl.appendChild(line);
         }
         if (storyEl.children.length > maxStory) storyEl.removeChild(storyEl.firstChild);
@@ -475,10 +490,12 @@
                 playerHint.textContent = waitingActor ? `等待 ${waitingActor} 输入...` : '等待玩家输入...';
                 btnSend.disabled = !waitingActor;
                 if (waitingActor) txtPlayer.focus();
+                if (cmdPrompt) cmdPrompt.textContent = (waitingActor ? `${waitingActor}>` : '>');
               } else if (ev.phase === 'player_input_end') {
                 waitingActor = '';
                 btnSend.disabled = true;
                 playerHint.textContent = '';
+                if (cmdPrompt) cmdPrompt.textContent = '>';
               }
             }
           } catch {}
@@ -576,6 +593,8 @@
     try {
       const res = await fetch('/api/player_say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, text }) });
       if (!res.ok) throw new Error(await res.text());
+      // history push
+      try { if (text && (cmdHist.length === 0 || cmdHist[cmdHist.length-1] !== text)) cmdHist.push(text); cmdIdx = cmdHist.length; } catch {}
       txtPlayer.value = '';
       playerHint.textContent = '';
       // 发送一次后关闭按钮，直到服务端再次下发等待提示
@@ -586,7 +605,17 @@
     }
   }
   btnSend.onclick = sendPlayer;
-  txtPlayer.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendPlayer(); });
+  txtPlayer.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendPlayer(); return; }
+    if (e.key === 'ArrowUp') {
+      if (cmdHist.length) { cmdIdx = Math.max(0, cmdIdx - 1); txtPlayer.value = cmdHist[cmdIdx] || ''; setTimeout(()=> txtPlayer.setSelectionRange(txtPlayer.value.length, txtPlayer.value.length), 0); e.preventDefault(); }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      if (cmdHist.length) { cmdIdx = Math.min(cmdHist.length, cmdIdx + 1); txtPlayer.value = (cmdIdx >= cmdHist.length) ? '' : (cmdHist[cmdIdx] || ''); setTimeout(()=> txtPlayer.setSelectionRange(txtPlayer.value.length, txtPlayer.value.length), 0); e.preventDefault(); }
+      return;
+    }
+  });
 
   // handle window resize for map
   if (mapView) {

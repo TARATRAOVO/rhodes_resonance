@@ -75,12 +75,20 @@ button[disabled], .btn[disabled] { background: #ededed; color: #a7a7a7; border-c
 .mb { margin-bottom: 16px; }
 /* Ensure last panel in a column sits flush with the bottom (align with left story panel) */
 .col > .panel.mb:last-child { margin-bottom: 0; }
+/* Make the spacing between map and input equal to title spacing */
+.col.side #mapPanel.mb { margin-bottom: 8px; }
 .h { font-weight:700; color: var(--text); margin:0 0 8px; letter-spacing: .02em; }
 #story pre { white-space: pre-wrap; margin: 0; }
 .panel#story { display:flex; flex-direction: column; min-height:0; overflow: hidden; flex: 1 1 auto; }
-#storyLines { flex: 1 1 auto; overflow: auto; -webkit-overflow-scrolling: touch; }
-.line { padding:6px 0; border-bottom: 1px dashed var(--border); }
-.narrative .actor { color: var(--accent); font-weight:600; }
+.line .content { grid-column: 2; min-width: 0; }
+#storyLines { flex: 1 1 auto; overflow: auto; -webkit-overflow-scrolling: touch; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.line { display:grid; grid-template-columns: 16px 1fr; column-gap: 8px; row-gap: 2px; align-items: start; padding:4px 0; border-bottom: 1px solid var(--border); overflow-wrap: break-word; word-break: break-word; }
+.line:before { content: ""; color: var(--accent); grid-column: 1; }
+.line.cmd:before { content: "$"; }
+.line.out:before { content: ""; }
+.line.error:before { content: "!"; color: #ff0000; }
+.narrative .actor { color: var(--accent-2); font-weight:600; }
+.narrative .actor { color: var(--accent-2); font-weight:600; }
 .error { color:#555555; }
 .dim { color: var(--muted); }
 
@@ -132,12 +140,14 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 
 /* Battle map */
 #mapPanel { display:flex; flex-direction: column; min-height:0; flex: 1 1 auto; overflow: hidden; }
-#mapWrap { height: auto; flex:1 1 auto; min-height: 160px; border:1px solid var(--border); border-radius:0; background: var(--surface); }
+#mapWrap { height: auto; flex:1 1 auto; min-height: 320px; border:1px solid var(--border); border-radius:0; background: var(--surface); }
 #mapCanvas { width:100%; height:100%; display:block; }
 
 /* Right column panel scroll policies */
-#statusPanel { overflow: auto; min-height: 0; flex: 0 1 auto; }
-#inputPanel { overflow: hidden; flex: 0 0 auto; }
+#statusPanel { overflow: auto; min-height: 0; flex: 0 1 auto; max-height: 20%; }
+#statusPanel .kv { padding-right: 4px; }
+#statusPanel.mb { margin-bottom: 8px; }
+#inputPanel { display:none; }
 
 /* Scrollbars (WebKit) */
 *::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -157,3 +167,11 @@ input:focus, textarea:focus, select:focus { outline: none; border-color: var(--a
 /* Collapse side column */
 body.hide-side .col.side { display:none; }
 body.hide-side .wrap { grid-template-columns: 1fr; }
+/* Commander input now lives inside story panel bottom */
+#story .cmd-bar { padding: 8px 0 0; margin-top: 8px; border-top: 1px solid var(--border); background: var(--bg-2); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+#story .cmd-bar .row { display:grid; grid-template-columns: auto minmax(0,1fr) max-content; column-gap: 16px; row-gap: 8px; align-items:center; width:100%; }
+#story .cmd-bar .prompt { color: var(--accent); user-select: none; padding: 0 2px; }
+#story #txtPlayer { width:100%; border: 0; border-bottom: 1px solid var(--border); padding: 6px 2px; background: var(--bg-2); color: var(--text); }
+#story #txtPlayer:focus { outline: none; border-color: var(--accent); box-shadow: none; }
+#story #btnSend { min-width: 96px; justify-self: end; }
+#story #playerHint { margin-top: 6px; font-size: 13px; }
