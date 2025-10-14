@@ -3,24 +3,37 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NPC Talk Demo</title>
+    <meta name="color-scheme" content="dark light" />
+    <title>Rhodes Resonance 控制台</title>
+    <!-- Fonts: Inter Tight (Latin) + Noto Sans SC (CJK) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
-    <header>
-      <button id="btnStart">Start</button>
-      <button id="btnRestart">Restart</button>
-      <button id="btnStop" disabled>Stop</button>
-      <span id="status" class="dim">idle</span>
-      <button id="btnSettings" style="float:right">设置</button>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand" title="Rhodes Resonance 控制台">Rhodes Resonance</div>
+        <div class="controls">
+          <button id="btnStart" class="btn">开始行动</button>
+          <button id="btnRestart" class="btn secondary">重启战局</button>
+          <button id="btnStop" class="btn danger" disabled>终止</button>
+          <span id="status" class="status-badge dim">待命</span>
+        </div>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <button id="btnToggleSide" class="btn ghost" aria-label="切换侧栏">侧栏</button>
+          <button id="btnSettings" class="btn ghost" aria-label="设置">设置</button>
+        </div>
+      </div>
     </header>
     <div class="wrap">
       <div class="col">
-        <div class="panel" id="story"><h3 class="h">故事</h3><div id="storyLines"></div></div>
+        <div class="panel" id="story"><h3 class="h">战术日志</h3><div id="storyLines"></div></div>
       </div>
       <div class="col side">
-        <div class="panel mb">
-          <h3 class="h">状态</h3>
+        <div class="panel mb" id="statusPanel">
+          <h3 class="h">作战态势</h3>
           <div class="kv" id="hud"></div>
         </div>
         <div class="panel mb" id="mapPanel">
@@ -28,11 +41,11 @@
           <div id="mapWrap"><canvas id="mapCanvas"></canvas></div>
           <div id="mapHint" class="dim" style="font-size:12px;margin-top:4px;"></div>
         </div>
-        <div class="panel mb">
-          <h3 class="h">玩家输入</h3>
+        <div class="panel mb" id="inputPanel">
+          <h3 class="h">指挥官指令</h3>
           <div class="kv" style="gap:6px 8px; align-items:center; width:100%;">
-            <input id="txtPlayer" type="text" placeholder="输入对白…（轮到玩家回合时可发送）" style="flex:1;min-width:12rem;padding:6px 8px;border-radius:4px;border:1px solid #1f2937;background:#0b1220;color:#e6e6e6;" />
-            <button id="btnSend" disabled>Send</button>
+            <input id="txtPlayer" type="text" placeholder="输入指令/对白…（轮到你时可发送）" />
+            <button id="btnSend" disabled>发送</button>
           </div>
           <div id="playerHint" class="dim" style="margin-top:6px;font-size:13px;"></div>
         </div>
@@ -42,9 +55,9 @@
     <div id="settingsDrawer" class="drawer hidden" aria-hidden="true">
       <div class="drawer-head">
         <div class="tabs" role="tablist">
-          <button class="tab active" data-tab="story" role="tab" aria-selected="true">故事</button>
-          <button class="tab" data-tab="weapons" role="tab" aria-selected="false">武器</button>
-          <button class="tab" data-tab="characters" role="tab" aria-selected="false">角色</button>
+          <button class="tab active" data-tab="story" role="tab" aria-selected="true">剧本</button>
+          <button class="tab" data-tab="weapons" role="tab" aria-selected="false">武装</button>
+          <button class="tab" data-tab="characters" role="tab" aria-selected="false">单位</button>
         </div>
         <div class="ops">
           <button id="btnCfgReset" class="ghost">重置</button>
@@ -78,23 +91,23 @@
             </div>
           </div>
           <div>
-            <label class="lbl">场景描述</label>
+            <label class="lbl">场景描述（环境/氛围/限制）</label>
             <textarea id="stSceneDesc" rows="3"></textarea>
           </div>
           <div class="grid2">
             <div>
-              <label class="lbl">细节</label>
+              <label class="lbl">关键细节</label>
               <div id="stDetails" class="list-edit"></div>
               <button id="btnAddDetail" class="sm">+ 添加细节</button>
             </div>
             <div>
-              <label class="lbl">目标</label>
+              <label class="lbl">作战目标</label>
               <div id="stObjectives" class="list-edit"></div>
               <button id="btnAddObjective" class="sm">+ 添加目标</button>
             </div>
           </div>
           <div>
-            <label class="lbl">初始坐标</label>
+              <label class="lbl">初始布置</label>
             <table class="tbl" id="stPositions">
               <thead><tr><th>名称</th><th>X</th><th>Y</th><th></th></tr></thead>
               <tbody></tbody>
@@ -115,31 +128,31 @@
               <tr>
                 <th style="min-width:10rem">ID</th>
                 <th>名称</th>
-                <th>触及(步)</th>
-                <th>能力</th>
-                <th>伤害表达式</th>
-                <th>默认熟练</th>
+                <th>射程(步)</th>
+                <th>相关属性</th>
+                <th>伤害公式</th>
+                <th>默认熟练度</th>
                 <th></th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
-          <button id="btnAddWeapon" class="sm">+ 添加武器</button>
+          <button id="btnAddWeapon" class="sm">+ 添加武装</button>
         </div>
 
         <!-- Characters Tab (表单化) -->
         <div class="tabpane hidden" data-pane="characters">
           <div class="grid2">
             <div>
-              <label class="lbl">角色列表</label>
+              <label class="lbl">单位列表</label>
               <div id="chList" class="vlist" style="height: 36vh; overflow:auto;"></div>
               <div style="margin-top:6px; display:flex; gap:6px;">
-                <button id="btnAddChar" class="sm">+ 新增角色</button>
+                <button id="btnAddChar" class="sm">+ 新增单位</button>
                 <button id="btnDelChar" class="sm">删除</button>
               </div>
             </div>
             <div>
-              <label class="lbl">基础信息</label>
+              <label class="lbl">单位档案</label>
               <div class="grid2">
                 <div>
                   <label class="lbl">名称</label>
@@ -153,7 +166,7 @@
                   </select>
                 </div>
               </div>
-              <label class="lbl">人设</label>
+              <label class="lbl">性格设定</label>
               <textarea id="chPersona" rows="3"></textarea>
               <label class="lbl">外观</label>
               <textarea id="chAppearance" rows="3"></textarea>
@@ -162,7 +175,7 @@
               <div id="chQuotes" class="list-edit"></div>
               <button id="btnAddQuote" class="sm">+ 添加台词</button>
 
-              <label class="lbl">DnD 数值</label>
+              <label class="lbl">单位属性</label>
               <div class="grid2">
                 <div><label class="lbl">等级</label><input id="chLvl" type="number" /></div>
                 <div><label class="lbl">AC</label><input id="chAC" type="number" /></div>
@@ -181,20 +194,20 @@
               </div>
               <div class="grid2">
                 <div>
-                  <label class="lbl">熟练技能</label>
+                  <label class="lbl">技能熟练</label>
                   <div id="chSkills" class="list-edit"></div>
                   <button id="btnAddSkill" class="sm">+ 添加技能</button>
                 </div>
                 <div>
-                  <label class="lbl">熟练豁免</label>
+                  <label class="lbl">豁免熟练</label>
                   <div id="chSaves" class="list-edit"></div>
                   <button id="btnAddSave" class="sm">+ 添加豁免</button>
                 </div>
               </div>
 
-              <label class="lbl">物品/背包</label>
+              <label class="lbl">携行物</label>
               <table class="tbl" id="chInvTable">
-                <thead><tr><th>Item ID</th><th>数量</th><th></th></tr></thead>
+                <thead><tr><th>物品ID</th><th>数量</th><th></th></tr></thead>
                 <tbody></tbody>
               </table>
               <div>
@@ -206,7 +219,7 @@
           </div>
         </div>
       </div>
-      <div id="cfgHint" class="dim" style="padding:6px 10px; border-top:1px solid #1f2937;">保存后需重启生效。</div>
+      <div id="cfgHint" class="dim" style="padding:6px 10px; border-top:1px solid var(--border);">保存后需重启生效。</div>
     </div>
     <script src="/app.js"></script>
   </body>

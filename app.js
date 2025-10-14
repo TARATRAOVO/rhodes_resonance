@@ -9,6 +9,7 @@
   const btnSend  = document.getElementById('btnSend');
   const playerHint = document.getElementById('playerHint');
   const btnSettings = document.getElementById('btnSettings');
+  const btnToggleSide = document.getElementById('btnToggleSide');
   // Map elements
   const mapCanvas = document.getElementById('mapCanvas');
   const mapHint = document.getElementById('mapHint');
@@ -79,6 +80,13 @@
 
   // ==== Simple Battle Map (static, no interaction/animation) ====
   const MapView = (() => {
+    // Read CSS variables to keep canvas in sync with theme
+    function cssVar(name, fallback) {
+      try {
+        const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+        return v || fallback;
+      } catch { return fallback; }
+    }
     function hashHue(s) {
       let h = 0 >>> 0;
       for (let i = 0; i < s.length; i++) h = (((h << 5) - h) + s.charCodeAt(i)) >>> 0; // 31x
@@ -93,6 +101,13 @@
         this.dpr = (typeof window !== 'undefined' && window.devicePixelRatio) ? window.devicePixelRatio : 1;
         this.bounds = null; // {minX,maxX,minY,maxY}
         this._lastState = null;
+        this.theme = {
+          bg: cssVar('--bg', '#f8f8f8'),
+          surface: cssVar('--surface', '#ffffff'),
+          border: cssVar('--border', '#e0e0e0'),
+          text: cssVar('--text', '#383838'),
+          muted: cssVar('--muted', '#7a7a7a')
+        };
         this.resize();
       }
       resize() {
@@ -131,7 +146,8 @@
         if (!this.canvas || !this.ctx) return;
         const w = this.canvas.clientWidth || 0;
         const h = this.canvas.clientHeight || 0;
-        this.ctx.fillStyle = '#0b1220';
+        // Use light surface like Awwwards cards
+        this.ctx.fillStyle = this.theme.surface || '#ffffff';
         this.ctx.fillRect(0, 0, w, h);
       }
       _drawGrid(bounds, stepPx) {
@@ -143,7 +159,7 @@
         // choose grid density
         const gap = stepPx >= 24 ? 1 : stepPx >= 12 ? 2 : stepPx >= 6 ? 5 : 10;
         ctx.save();
-        ctx.strokeStyle = '#1f2937';
+        ctx.strokeStyle = this.theme.border || '#e0e0e0';
         ctx.lineWidth = 1;
         // verticals
         const startX = Math.floor(bounds.minX / gap) * gap;
@@ -178,11 +194,11 @@
           const x = originX + parseInt(p[0],10) * stepPx;
           const y = originY + parseInt(p[1],10) * stepPx;
           const c = nameColor(nm);
-          ctx.fillStyle = c; ctx.strokeStyle = '#0b0e14';
+          ctx.fillStyle = c; ctx.strokeStyle = '#ffffff';
           ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI*2); ctx.fill();
           ctx.stroke();
           // label (name only)
-          ctx.fillStyle = '#e6e6e6';
+          ctx.fillStyle = this.theme.text || '#383838';
           ctx.fillText(String(nm), x + radius + 4, y);
         }
         ctx.restore();
@@ -214,6 +230,7 @@
   })();
 
   const mapView = (mapCanvas && mapCanvas.getContext) ? new MapView(mapCanvas, mapHint) : null;
+  if (mapView) window.addEventListener('resize', () => mapView.resize());
   // Settings editor state
   let activeTab = 'story';
   const cfg = { story: null, weapons: null, characters: null };
@@ -246,14 +263,14 @@
     try {
       const inCombat = !!state.in_combat;
       const round = state.round ?? '';
-      kv.push(`<span class="pill">combat: ${inCombat}</span>`);
-      if (round) kv.push(`<span class="pill">round: ${round}</span>`);
+      kv.push(`<span class="pill">战斗: ${inCombat ? '进行中' : '否'}</span>`);
+      if (round) kv.push(`<span class="pill">回合: ${round}</span>`);
       const parts = (state.participants || []).join(', ');
-      if (parts) kv.push(`<span class="pill">actors: ${esc(parts)}</span>`);
+      if (parts) kv.push(`<span class="pill">参战: ${esc(parts)}</span>`);
       const loc = state.location || '';
-      if (loc) kv.push(`<span class="pill">location: ${esc(loc)}</span>`);
+      if (loc) kv.push(`<span class="pill">位置: ${esc(loc)}</span>`);
       const timeMin = state.time_min;
-      if (typeof timeMin === 'number') kv.push(`<span class="pill">time: ${String(Math.floor(timeMin/60)).padStart(2,'0')}:${String(timeMin%60).padStart(2,'0')}</span>`);
+      if (typeof timeMin === 'number') kv.push(`<span class="pill">时间: ${String(Math.floor(timeMin/60)).padStart(2,'0')}:${String(timeMin%60).padStart(2,'0')}</span>`);
       // 追加：目标状态
       const objs = Array.isArray(state.objectives) ? state.objectives : [];
       const objStatus = (state.objective_status || {});
@@ -263,8 +280,8 @@
         kv.push(`<span class="pill">${esc(o)}:${label}</span>`);
       }
       // 追加：紧张度/标记
-      if (typeof state.tension === 'number') kv.push(`<span class="pill">tension: ${state.tension}</span>`);
-      if (Array.isArray(state.marks) && state.marks.length) kv.push(`<span class="pill">marks: ${state.marks.length}</span>`);
+      if (typeof state.tension === 'number') kv.push(`<span class="pill">紧张度: ${state.tension}</span>`);
+      if (Array.isArray(state.marks) && state.marks.length) kv.push(`<span class="pill">标记: ${state.marks.length}</span>`);
       // 追加：每个参与者的 HP 与坐标
       const chars = state.characters || {};
       const pos = state.positions || {};
@@ -282,7 +299,7 @@
       const guards = state.guardians || {};
       try {
         const pairs = Object.entries(guards).slice(0, 6).map(([k,v])=>`${k}->${v}`);
-        if (pairs.length) kv.push(`<span class="pill">guard: ${esc(pairs.join(' | '))}</span>`);
+        if (pairs.length) kv.push(`<span class="pill">守护: ${esc(pairs.join(' | '))}</span>`);
       } catch {}
     } catch {}
     hudEl.innerHTML = kv.join(' ');
@@ -433,8 +450,8 @@
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const url = `${proto}://${location.host}/ws/events?since=${lastSeq}`;
     ws = new WebSocket(url);
-    setStatus('connecting...');
-    ws.onopen = () => { setStatus('connected'); reconnectDelay = 500; };
+    setStatus('连接中…');
+    ws.onopen = () => { setStatus('已连接'); reconnectDelay = 500; };
     ws.onmessage = (m) => {
       try {
         const obj = JSON.parse(m.data);
@@ -442,13 +459,13 @@
           if (typeof obj.last_sequence === 'number') lastSeq = Math.max(lastSeq, obj.last_sequence);
           if (obj.state) { renderHUD(obj.state); if (mapView) mapView.update(obj.state); }
           // 查询一次运行状态，刷新按钮
-          fetch('/api/state').then(r=>r.json()).then(st => { running = !!st.running; updateButtons(); if (running) setStatus('running'); }).catch(()=>{});
+          fetch('/api/state').then(r=>r.json()).then(st => { running = !!st.running; updateButtons(); if (running) setStatus('运行中'); }).catch(()=>{});
           return;
         }
         if (obj.type === 'event' && obj.event) {
           if (debugMode) { try { console.debug('EVT', obj.event); } catch {} }
           handleEvent(obj.event);
-          if (running) setStatus('running');
+          if (running) setStatus('运行中');
           // 如果是等待玩家输入的信号，提示一下，并开启发送按钮
           try {
             const ev = obj.event;
@@ -468,14 +485,14 @@
           return;
         }
         if (obj.type === 'end') {
-          setStatus('finished');
+          setStatus('已结束');
           running = false; updateButtons();
           return;
         }
       } catch (e) {}
     };
     ws.onclose = () => {
-      setStatus('disconnected');
+      setStatus('已断开');
       ws = null;
       setTimeout(connectWS, reconnectDelay);
       reconnectDelay = Math.min(maxDelay, reconnectDelay * 2);
@@ -493,22 +510,32 @@
     btnStart.disabled = true;
     try {
       await postJSON('/api/start');
-      running = true; updateButtons(); setStatus('running');
+      running = true; updateButtons(); setStatus('运行中');
       if (!ws) connectWS();
       // 已进入运行态
     } catch (e) {
       btnStart.disabled = false;
-      alert('start failed: ' + (e.message || e));
+      alert('启动失败: ' + (e.message || e));
     }
   };
+
+  // Sidebar toggle for better use of space
+  if (btnToggleSide) {
+    btnToggleSide.onclick = () => {
+      document.body.classList.toggle('hide-side');
+      setTimeout(() => { if (mapView) mapView.resize(); }, 60);
+    };
+  }
+
+  // Golden ratio layout: no sizer
 
   btnStop.onclick = async () => {
     btnStop.disabled = true;
     try {
       await postJSON('/api/stop');
-      setStatus('stopped');
+      setStatus('已停止');
     } catch (e) {
-      alert('stop failed: ' + (e.message || e));
+      alert('终止失败: ' + (e.message || e));
     } finally {
       running = false; updateButtons();
     }
