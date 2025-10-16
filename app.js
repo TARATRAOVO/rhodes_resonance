@@ -11,6 +11,7 @@
   const btnSettings = document.getElementById('btnSettings');
   const cmdPrompt = document.getElementById('cmdPrompt');
   const btnToggleSide = document.getElementById('btnToggleSide');
+  const storyPicker = document.getElementById('storyPicker');
   // Map elements
   const mapCanvas = document.getElementById('mapCanvas');
   const mapHint = document.getElementById('mapHint');
@@ -259,36 +260,32 @@
   let chRelations = {};
   const dirty = { story: false, weapons: false, characters: false };
   // Story container state for multi-story in single file
-  let storyContainer = null;      // { active_id, stories: {id: story} }
+  let storyContainer = null;      // { stories: {id: story} }
   let storyContainerRaw = null;   // raw object from server to preserve unknown root keys
   let selectedStoryId = '';
 
   // Small helpers
   function deepClone(obj) { return JSON.parse(JSON.stringify(obj || {})); }
   function normalizeStoryContainer(data) {
-    // Accept legacy single-story or container
+    // Accept legacy single-story or container; ignore any legacy active_id
     if (data && typeof data === 'object' && data.stories && typeof data.stories === 'object') {
-      const active = typeof data.active_id === 'string' ? data.active_id : '';
-      const first = Object.keys(data.stories || {})[0] || '';
-      return { active_id: active || first, stories: deepClone(data.stories) };
+      return { stories: deepClone(data.stories) };
     }
     // legacy: wrap into default id
-    return { active_id: 'default', stories: { 'default': deepClone(data || {}) } };
+    return { stories: { 'default': deepClone(data || {}) } };
   }
   function updateStorySelectUI() {
     if (!stStorySelect) return;
     stStorySelect.innerHTML = '';
     if (!storyContainer || !storyContainer.stories) { stStorySelect.disabled = true; return; }
     const ids = Object.keys(storyContainer.stories);
-    if (ids.length <= 1 && (!storyContainer.active_id || storyContainer.active_id === ids[0])) {
-      // keep selector visible to enable CRUD; but allow choosing only one
-    }
+    // keep selector visible to enable CRUD even if only one
     for (const id of ids) {
       const opt = document.createElement('option');
-      opt.value = id; opt.textContent = id === storyContainer.active_id ? `${id} (激活)` : id;
+      opt.value = id; opt.textContent = id;
       stStorySelect.appendChild(opt);
     }
-    stStorySelect.value = selectedStoryId || storyContainer.active_id || ids[0] || '';
+    stStorySelect.value = selectedStoryId || ids[0] || '';
   }
   function commitLocalStoryEdits() {
     try {
@@ -363,6 +360,34 @@
       } catch {}
     } catch {}
     hudEl.innerHTML = kv.join(' ');
+  }
+
+  // ---- Topbar story picker (runtime selection, not persisted) ----
+  function getSelectedStoryId() {
+    try { return storyPicker ? String(storyPicker.value || '').trim() : ''; } catch { return ''; }
+  }
+  async function initStoryPicker() {
+    if (!storyPicker) return;
+    try {
+      const res = await fetch('/api/stories');
+      const obj = await res.json();
+      const ids = Array.isArray(obj.ids) ? obj.ids : [];
+      const serverSel = typeof obj.selected === 'string' ? obj.selected : '';
+      storyPicker.innerHTML = '';
+      ids.forEach(id => { const opt = document.createElement('option'); opt.value = id; opt.textContent = id; storyPicker.appendChild(opt); });
+      const local = (localStorage.getItem('storyPicker.selected') || '').trim();
+      let chosen = '';
+      if (local && ids.includes(local)) chosen = local; else if (serverSel && ids.includes(serverSel)) chosen = serverSel; else chosen = (ids[0] || '');
+      storyPicker.value = chosen;
+      if (chosen && chosen !== serverSel) {
+        try { await fetch('/api/select_story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: chosen }) }); } catch {}
+      }
+      storyPicker.onchange = async () => {
+        const id = getSelectedStoryId();
+        try { localStorage.setItem('storyPicker.selected', id); } catch {}
+        try { await fetch('/api/select_story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); } catch {}
+      };
+    } catch {}
   }
 
   function handleEvent(ev) {
@@ -571,7 +596,9 @@
   btnStart.onclick = async () => {
     btnStart.disabled = true;
     try {
-      await postJSON('/api/start');
+      const sid = getSelectedStoryId();
+      const res = await fetch('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ story_id: sid || undefined }) });
+      if (!res.ok) throw new Error(await res.text());
       running = true; updateButtons(); setStatus('运行中');
       if (!ws) connectWS();
       // 已进入运行态
@@ -588,6 +615,8 @@
       setTimeout(() => { if (mapView) mapView.resize(); }, 60);
     };
   }
+  // Initialize story picker once at startup
+  initStoryPicker();
 
   // Golden ratio layout: no sizer
 
@@ -606,7 +635,8 @@
   btnRestart.onclick = async () => {
     btnStart.disabled = true; btnStop.disabled = true; btnRestart.disabled = true;
     try {
-      const res = await fetch('/api/restart', { method: 'POST' });
+      const sid = getSelectedStoryId();
+      const res = await fetch('/api/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ story_id: sid || undefined }) });
       if (!res.ok) throw new Error(await res.text());
       // UI 清空到初始状态
       storyEl.innerHTML = '';
@@ -986,7 +1016,11 @@
     // Story: support container format
     storyContainerRaw = deepClone((stRes||{}).data || {});
     storyContainer = normalizeStoryContainer(storyContainerRaw);
-    selectedStoryId = storyContainer.active_id || Object.keys(storyContainer.stories||{})[0] || '';
+    // Prefer server-selected story if available; otherwise the first id
+    let ids = Object.keys(storyContainer.stories||{});
+    let serverSelected = '';
+    try { const si = await fetch('/api/stories').then(r=>r.json()); serverSelected = (si && si.selected) || ''; } catch {}
+    selectedStoryId = serverSelected || selectedStoryId || ids[0] || '';
     updateStorySelectUI();
     // Render the selected story into the existing form
     original.story = deepClone(storyContainer.stories[selectedStoryId] || {});
@@ -1055,21 +1089,15 @@
       let name = activeTab;
       let data = null;
       if (name === 'story') {
-        // commit local edits into container
+        // commit local edits into container; never write legacy active_id
         commitLocalStoryEdits();
-        // merge with raw to preserve unknown root keys when present
         let merged = {};
         if (storyContainerRaw && storyContainerRaw.stories) {
           merged = deepClone(storyContainerRaw);
           merged.stories = deepClone(storyContainer.stories || {});
-          // active id unchanged unless restart path below sets it
-          merged.active_id = storyContainer.active_id || merged.active_id;
+          if ('active_id' in merged) delete merged.active_id;
         } else {
-          merged = { active_id: storyContainer.active_id, stories: deepClone(storyContainer.stories||{}) };
-        }
-        if (restart) {
-          merged.active_id = selectedStoryId || merged.active_id;
-          storyContainer.active_id = merged.active_id;
+          merged = { stories: deepClone(storyContainer.stories || {}) };
         }
         data = merged;
       }
@@ -1085,7 +1113,8 @@
         // mimic btnRestart behaviour
         btnStart.disabled = true; btnStop.disabled = true; btnRestart.disabled = true;
         try {
-          const r2 = await fetch('/api/restart', { method: 'POST' });
+          const sid = getSelectedStoryId();
+          const r2 = await fetch('/api/restart', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ story_id: sid || undefined }) });
           if (!r2.ok) throw new Error(await r2.text());
           storyEl.innerHTML = '';
           hudEl.innerHTML = '';
@@ -1182,7 +1211,6 @@
     commitLocalStoryEdits();
     storyContainer.stories[id] = deepClone(storyContainer.stories[selectedStoryId] || createEmptyStory());
     delete storyContainer.stories[selectedStoryId];
-    if (storyContainer.active_id === selectedStoryId) storyContainer.active_id = id;
     selectedStoryId = id;
     updateStorySelectUI();
     original.story = deepClone(storyContainer.stories[id]);
@@ -1197,8 +1225,7 @@
     if (!confirm(`确定删除故事 ${selectedStoryId} ？`)) return;
     delete storyContainer.stories[selectedStoryId];
     const rest = Object.keys(storyContainer.stories||{});
-    if (storyContainer.active_id === selectedStoryId) storyContainer.active_id = rest[0] || '';
-    selectedStoryId = storyContainer.active_id || rest[0] || '';
+    selectedStoryId = rest[0] || '';
     updateStorySelectUI();
     original.story = deepClone(storyContainer.stories[selectedStoryId] || createEmptyStory());
     cfg.story = deepClone(storyContainer.stories[selectedStoryId] || createEmptyStory());
