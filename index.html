@@ -20,10 +20,10 @@
           <button id="btnRestart" class="btn secondary">重启战局</button>
           <button id="btnStop" class="btn danger" disabled>终止</button>
           <span id="status" class="status-badge dim">待命</span>
-          <label for="storyPicker" class="dim" style="margin-left:8px;">战局</label>
-          <select id="storyPicker" style="min-width:14rem"></select>
+          <label for="storyPicker" class="dim ml-8">战局</label>
+          <select id="storyPicker"></select>
         </div>
-        <div style="display:flex; gap:6px; align-items:center;">
+        <div class="topbar-actions">
           <button id="btnToggleSide" class="btn ghost" aria-label="切换侧栏">侧栏</button>
           <button id="btnSettings" class="btn ghost" aria-label="设置">设置</button>
         </div>
@@ -45,14 +45,15 @@
         </div>
       </div>
       <div class="col side">
-        <div class="panel mb" id="statusPanel">
+        <div class="panel" id="statusPanel">
           <h3 class="h">作战态势</h3>
           <div class="kv" id="hud"></div>
         </div>
-        <div class="panel mb" id="mapPanel">
+        <div id="sideSpacer" aria-hidden="true"></div>
+        <div class="panel" id="mapPanel">
           <h3 class="h">战场地图</h3>
           <div id="mapWrap"><canvas id="mapCanvas"></canvas></div>
-          <div id="mapHint" class="dim" style="font-size:12px;margin-top:4px;"></div>
+          <div id="mapHint" class="dim"></div>
         </div>
         
       </div>
@@ -75,9 +76,9 @@
       <div class="drawer-body">
         <!-- Story Tab -->
         <div class="tabpane" data-pane="story">
-          <div style="display:flex; gap:6px; align-items:center; margin-bottom:8px;">
-            <label class="lbl" style="margin:0;">当前故事</label>
-            <select id="stStorySelect" style="min-width:14rem"></select>
+          <div class="toolbar-row">
+            <label class="lbl m-0">当前故事</label>
+            <select id="stStorySelect"></select>
             <button id="btnStoryNew" class="sm">新建</button>
             <button id="btnStoryCopy" class="sm">复制</button>
             <button id="btnStoryRename" class="sm">重命名</button>
@@ -127,9 +128,9 @@
               <tbody></tbody>
             </table>
             <div>
-              <select id="stPosNameSel" style="width:14rem"></select>
-              <input id="stPosX" type="number" placeholder="X" style="width:6rem" />
-              <input id="stPosY" type="number" placeholder="Y" style="width:6rem" />
+              <select id="stPosNameSel"></select>
+              <input id="stPosX" type="number" placeholder="X" />
+              <input id="stPosY" type="number" placeholder="Y" />
               <button id="btnAddPos" class="sm">+ 添加坐标</button>
             </div>
           </div>
@@ -140,7 +141,7 @@
           <table class="tbl" id="wpTable">
             <thead>
               <tr>
-                <th style="min-width:10rem">ID</th>
+                <th>ID</th>
                 <th>名称</th>
                 <th>射程(步)</th>
                 <th>相关属性</th>
@@ -159,8 +160,8 @@
           <div class="grid2">
             <div>
               <label class="lbl">单位列表</label>
-              <div id="chList" class="vlist" style="height: 36vh; overflow:auto;"></div>
-              <div style="margin-top:6px; display:flex; gap:6px;">
+              <div id="chList" class="vlist"></div>
+              <div class="toolbar-row mt-6">
                 <button id="btnAddChar" class="sm">+ 新增单位</button>
                 <button id="btnDelChar" class="sm">删除</button>
               </div>
@@ -225,15 +226,15 @@
                 <tbody></tbody>
               </table>
               <div>
-                <select id="chInvIdSel" style="width:14rem"></select>
-                <input id="chInvCount" type="number" placeholder="数量" style="width:8rem" />
+                <select id="chInvIdSel"></select>
+                <input id="chInvCount" type="number" placeholder="数量" />
                 <button id="btnAddInv" class="sm">+ 添加物品</button>
               </div>
             </div>
           </div>
         </div>
       </div>
-      <div id="cfgHint" class="dim" style="padding:6px 10px; border-top:1px solid var(--border);">保存后需重启生效。</div>
+      <div id="cfgHint" class="dim">保存后需重启生效。</div>
     </div>
     <script src="/app.js"></script>
   </body>
