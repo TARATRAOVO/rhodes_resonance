@@ -37,6 +37,12 @@
   const btnAddDetail = drawer ? drawer.querySelector('#btnAddDetail') : null;
   const btnAddObjective = drawer ? drawer.querySelector('#btnAddObjective') : null;
   const btnAddPos = drawer ? drawer.querySelector('#btnAddPos') : null;
+  // Story multi-selector controls
+  const stStorySelect = drawer ? drawer.querySelector('#stStorySelect') : null;
+  const btnStoryNew = drawer ? drawer.querySelector('#btnStoryNew') : null;
+  const btnStoryCopy = drawer ? drawer.querySelector('#btnStoryCopy') : null;
+  const btnStoryRename = drawer ? drawer.querySelector('#btnStoryRename') : null;
+  const btnStoryDelete = drawer ? drawer.querySelector('#btnStoryDelete') : null;
   // Weapons controls
   const wpTable = drawer ? drawer.querySelector('#wpTable') : null;
   const btnAddWeapon = drawer ? drawer.querySelector('#btnAddWeapon') : null;
@@ -252,6 +258,45 @@
   let chActiveName = '';
   let chRelations = {};
   const dirty = { story: false, weapons: false, characters: false };
+  // Story container state for multi-story in single file
+  let storyContainer = null;      // { active_id, stories: {id: story} }
+  let storyContainerRaw = null;   // raw object from server to preserve unknown root keys
+  let selectedStoryId = '';
+
+  // Small helpers
+  function deepClone(obj) { return JSON.parse(JSON.stringify(obj || {})); }
+  function normalizeStoryContainer(data) {
+    // Accept legacy single-story or container
+    if (data && typeof data === 'object' && data.stories && typeof data.stories === 'object') {
+      const active = typeof data.active_id === 'string' ? data.active_id : '';
+      const first = Object.keys(data.stories || {})[0] || '';
+      return { active_id: active || first, stories: deepClone(data.stories) };
+    }
+    // legacy: wrap into default id
+    return { active_id: 'default', stories: { 'default': deepClone(data || {}) } };
+  }
+  function updateStorySelectUI() {
+    if (!stStorySelect) return;
+    stStorySelect.innerHTML = '';
+    if (!storyContainer || !storyContainer.stories) { stStorySelect.disabled = true; return; }
+    const ids = Object.keys(storyContainer.stories);
+    if (ids.length <= 1 && (!storyContainer.active_id || storyContainer.active_id === ids[0])) {
+      // keep selector visible to enable CRUD; but allow choosing only one
+    }
+    for (const id of ids) {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = id === storyContainer.active_id ? `${id} (激活)` : id;
+      stStorySelect.appendChild(opt);
+    }
+    stStorySelect.value = selectedStoryId || storyContainer.active_id || ids[0] || '';
+  }
+  function commitLocalStoryEdits() {
+    try {
+      if (!storyContainer || !selectedStoryId) return;
+      const single = storyCollect();
+      storyContainer.stories[selectedStoryId] = single;
+    } catch {}
+  }
 
   function setStatus(text) { statusEl.textContent = text; }
   function lineEl(html, cls='') {
@@ -938,7 +983,17 @@
     ]);
     lastState = (stState||{}).state || lastState || {};
     renderCharactersForm((chRes||{}).data||{});
-    renderStoryForm((stRes||{}).data||{}, lastState);
+    // Story: support container format
+    storyContainerRaw = deepClone((stRes||{}).data || {});
+    storyContainer = normalizeStoryContainer(storyContainerRaw);
+    selectedStoryId = storyContainer.active_id || Object.keys(storyContainer.stories||{})[0] || '';
+    updateStorySelectUI();
+    // Render the selected story into the existing form
+    original.story = deepClone(storyContainer.stories[selectedStoryId] || {});
+    cfg.story = deepClone(storyContainer.stories[selectedStoryId] || {});
+    dirty.story = false;
+    renderStoryForm(cfg.story, lastState);
+    // Weapons unchanged
     renderWeaponsForm((wpRes||{}).data||{});
   }
 
@@ -999,7 +1054,25 @@
     try {
       let name = activeTab;
       let data = null;
-      if (name === 'story') data = storyCollect();
+      if (name === 'story') {
+        // commit local edits into container
+        commitLocalStoryEdits();
+        // merge with raw to preserve unknown root keys when present
+        let merged = {};
+        if (storyContainerRaw && storyContainerRaw.stories) {
+          merged = deepClone(storyContainerRaw);
+          merged.stories = deepClone(storyContainer.stories || {});
+          // active id unchanged unless restart path below sets it
+          merged.active_id = storyContainer.active_id || merged.active_id;
+        } else {
+          merged = { active_id: storyContainer.active_id, stories: deepClone(storyContainer.stories||{}) };
+        }
+        if (restart) {
+          merged.active_id = selectedStoryId || merged.active_id;
+          storyContainer.active_id = merged.active_id;
+        }
+        data = merged;
+      }
       else if (name === 'weapons') data = weaponsCollect();
       else if (name === 'characters') data = charactersCollect();
       const res = await fetch(`/api/config/${name}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
@@ -1049,6 +1122,89 @@
   for (const b of tabBtns) {
     b.onclick = () => setActiveTab(b.getAttribute('data-tab'));
   }
+  // Story multi-selector events
+  function sanitizeStoryId(s) {
+    try { return String(s||'').trim().toLowerCase().replace(/\s+/g,'_'); } catch { return ''; }
+  }
+  function createEmptyStory() {
+    return { meta: { title: '', style: '' }, scene: { name:'', description:'', objectives:[], time:'', weather:'', details:[] }, initial_positions: {} };
+  }
+  if (stStorySelect) stStorySelect.addEventListener('change', () => {
+    if (!storyContainer) return;
+    // stash current edits into container before switching
+    commitLocalStoryEdits();
+    const id = String(stStorySelect.value||'');
+    selectedStoryId = id;
+    original.story = deepClone(storyContainer.stories[id] || {});
+    cfg.story = deepClone(storyContainer.stories[id] || {});
+    renderStoryForm(cfg.story, lastState || null);
+  });
+  if (btnStoryNew) btnStoryNew.onclick = () => {
+    if (!storyContainer) return;
+    const nm = prompt('输入新故事 ID（小写字母数字与下划线/短横线）');
+    if (!nm) return;
+    const id = sanitizeStoryId(nm);
+    if (!id || /[^a-z0-9_-]/.test(id)) { alert('无效 ID，允许 a-z0-9_-'); return; }
+    if ((storyContainer.stories||{})[id]) { alert('已存在同名故事'); return; }
+    commitLocalStoryEdits();
+    storyContainer.stories[id] = createEmptyStory();
+    selectedStoryId = id;
+    updateStorySelectUI();
+    original.story = deepClone(storyContainer.stories[id]);
+    cfg.story = deepClone(storyContainer.stories[id]);
+    renderStoryForm(cfg.story, lastState || null);
+    markDirty('story');
+  };
+  if (btnStoryCopy) btnStoryCopy.onclick = () => {
+    if (!storyContainer || !selectedStoryId) return;
+    const nm = prompt('复制为新故事 ID');
+    if (!nm) return;
+    const id = sanitizeStoryId(nm);
+    if (!id || /[^a-z0-9_-]/.test(id)) { alert('无效 ID，允许 a-z0-9_-'); return; }
+    if ((storyContainer.stories||{})[id]) { alert('已存在同名故事'); return; }
+    commitLocalStoryEdits();
+    storyContainer.stories[id] = deepClone(storyContainer.stories[selectedStoryId] || createEmptyStory());
+    selectedStoryId = id;
+    updateStorySelectUI();
+    original.story = deepClone(storyContainer.stories[id]);
+    cfg.story = deepClone(storyContainer.stories[id]);
+    renderStoryForm(cfg.story, lastState || null);
+    markDirty('story');
+  };
+  if (btnStoryRename) btnStoryRename.onclick = () => {
+    if (!storyContainer || !selectedStoryId) return;
+    const nm = prompt(`重命名故事 ${selectedStoryId} 为`);
+    if (!nm) return;
+    const id = sanitizeStoryId(nm);
+    if (!id || /[^a-z0-9_-]/.test(id)) { alert('无效 ID，允许 a-z0-9_-'); return; }
+    if (id === selectedStoryId) return;
+    if ((storyContainer.stories||{})[id]) { alert('已存在同名故事'); return; }
+    commitLocalStoryEdits();
+    storyContainer.stories[id] = deepClone(storyContainer.stories[selectedStoryId] || createEmptyStory());
+    delete storyContainer.stories[selectedStoryId];
+    if (storyContainer.active_id === selectedStoryId) storyContainer.active_id = id;
+    selectedStoryId = id;
+    updateStorySelectUI();
+    original.story = deepClone(storyContainer.stories[id]);
+    cfg.story = deepClone(storyContainer.stories[id]);
+    renderStoryForm(cfg.story, lastState || null);
+    markDirty('story');
+  };
+  if (btnStoryDelete) btnStoryDelete.onclick = () => {
+    if (!storyContainer || !selectedStoryId) return;
+    const ids = Object.keys(storyContainer.stories||{});
+    if (ids.length <= 1) { alert('至少保留一个故事'); return; }
+    if (!confirm(`确定删除故事 ${selectedStoryId} ？`)) return;
+    delete storyContainer.stories[selectedStoryId];
+    const rest = Object.keys(storyContainer.stories||{});
+    if (storyContainer.active_id === selectedStoryId) storyContainer.active_id = rest[0] || '';
+    selectedStoryId = storyContainer.active_id || rest[0] || '';
+    updateStorySelectUI();
+    original.story = deepClone(storyContainer.stories[selectedStoryId] || createEmptyStory());
+    cfg.story = deepClone(storyContainer.stories[selectedStoryId] || createEmptyStory());
+    renderStoryForm(cfg.story, lastState || null);
+    markDirty('story');
+  };
   if (btnAddDetail) btnAddDetail.onclick = () => { const scene = (cfg.story.scene = cfg.story.scene || {}); if (!Array.isArray(scene.details)) scene.details = []; scene.details.push(''); renderStoryForm(cfg.story, lastState || null); markDirty('story'); };
   if (btnAddObjective) btnAddObjective.onclick = () => { const scene = (cfg.story.scene = cfg.story.scene || {}); if (!Array.isArray(scene.objectives)) scene.objectives = []; scene.objectives.push(''); renderStoryForm(cfg.story, lastState || null); markDirty('story'); };
   if (btnAddPos) btnAddPos.onclick = () => {
