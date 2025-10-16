@@ -130,6 +130,40 @@ input[type="text"], input[type="number"], textarea, select {
 }
 input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,0,0,.12); }
 
+/* Global selects: unified look across the app */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: 0;
+  /* Right padding reserves space for the chevron */
+  padding: 6px 28px 6px 8px;
+  font-weight: 600;
+  /* Inline SVG chevron for consistent rendering */
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%23666666' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+  transition: background .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+@media (hover: hover) {
+  select:hover:not(:disabled) {
+    background-color: var(--accent);
+    color: #fff;
+    /* Swap chevron to white for contrast on dark hover */
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%23ffffff' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  }
+}
+select:disabled {
+  background-color: #ededed;
+  color: #a7a7a7;
+  border-color: var(--border);
+  cursor: not-allowed;
+}
+
 .sm { padding:4px 8px; background:#f3f4f6; border: 1px solid var(--border); border-radius: 0; color: #111827; cursor: pointer; }
 .sm:hover { background:#ebedf0; }
 
@@ -194,3 +228,38 @@ body.hide-side .wrap { grid-template-columns: 1fr; }
 #cfgHint { padding: 6px 10px; border-top: 1px solid var(--border); }
 /* Weapons table first column width */
 #wpTable th:first-child { min-width: 10rem; }
+
+/* Density tweaks: tables and toolbars retain compact layout */
+.tbl select { padding: 4px 24px 4px 6px; font-size: 12px; }
+.toolbar-row select { padding: 6px 24px 6px 8px; }
+
+/* Custom Select (styled popup list) */
+.ui-select { position: relative; display: inline-block; vertical-align: middle; }
+.ui-select.full { width: 100%; }
+.tbl .ui-select { width: 100%; }
+.toolbar-row .ui-select { /* keep toolbars compact */ }
+.ui-select select { position: absolute; opacity: 0; pointer-events: none; width: 0; height: 0; }
+.ui-select-trigger {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%;
+  border: 1px solid var(--accent); border-radius: 0; background: var(--bg-2); color: var(--text);
+  font-weight: 600; font-size: 13px; padding: 8px 28px 8px 10px; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 16 16' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%23666666' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 12px 12px;
+  transition: background .2s ease, color .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+.ui-select.open .ui-select-trigger, .ui-select-trigger:hover { background: #f3f4f6; }
+.ui-select-trigger:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,0,0,.12); }
+
+.ui-select-menu {
+  position: absolute; left: 0; top: calc(100% + 4px); min-width: 100%; max-height: 240px; overflow: auto;
+  border: 1px solid var(--accent); border-radius: 0; background: var(--bg-2); color: var(--text);
+  box-shadow: 0 8px 24px rgba(16,24,40,.12);
+  z-index: 1200; display: none;
+}
+.ui-select.open .ui-select-menu { display: block; }
+.ui-select-menu.drop-up { top: auto; bottom: calc(100% + 4px); }
+.ui-select-option { padding: 8px 10px; cursor: pointer; font-size: 13px; }
+.ui-select-option:hover, .ui-select-option.active { background: #f3f4f6; }
+.ui-select-option[aria-selected="true"] { color: var(--accent); font-weight: 600; }

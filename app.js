@@ -92,6 +92,151 @@
   let lastState = {};
 
   // ==== Simple Battle Map (static, no interaction/animation) ====
+  // ==== UI: Custom Select (styled popup list, mirrors native select) ====
+  const SelectUX = (() => {
+    const OPEN_CLASS = 'open';
+    // Close all open menus on outside click / ESC
+    function closeAll(exceptWrap = null) {
+      document.querySelectorAll('.ui-select.'+OPEN_CLASS).forEach(w => { if (w !== exceptWrap) w.classList.remove(OPEN_CLASS); });
+    }
+    function buildMenuFromSelect(sel, menu) {
+      menu.innerHTML = '';
+      const opts = Array.from(sel.options || []);
+      opts.forEach((o, idx) => {
+        const it = document.createElement('div');
+        it.className = 'ui-select-option';
+        it.setAttribute('role', 'option');
+        it.dataset.value = o.value;
+        it.textContent = o.textContent || o.value || '';
+        if (o.disabled) it.setAttribute('aria-disabled', 'true');
+        if (o.selected) it.setAttribute('aria-selected', 'true');
+        it.addEventListener('click', (e) => {
+          if (o.disabled) return;
+          if (sel.value !== o.value) {
+            sel.value = o.value;
+            // Dispatch native change for existing handlers
+            sel.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          const wrap = menu.closest('.ui-select');
+          if (wrap) wrap.classList.remove(OPEN_CLASS);
+        });
+        menu.appendChild(it);
+      });
+    }
+    function syncTriggerLabel(sel, trigger) {
+      try {
+        const t = sel.options && sel.selectedIndex >= 0 ? (sel.options[sel.selectedIndex].textContent || '') : '';
+        trigger.textContent = t || '请选择';
+      } catch { trigger.textContent = '请选择'; }
+    }
+    function ensureWrapWidth(sel, wrap) {
+      try {
+        const rect = sel.getBoundingClientRect();
+        if (rect && rect.width) wrap.style.width = rect.width + 'px';
+      } catch {}
+      // table cells or toolbar rows want full width
+      try {
+        const p = sel.parentElement; const gp = p && p.parentElement;
+        if (p && (p.classList.contains('tbl') || p.classList.contains('toolbar-row'))) wrap.classList.add('full');
+        if (gp && (gp.classList.contains('tbl') || gp.classList.contains('toolbar-row'))) wrap.classList.add('full');
+      } catch {}
+    }
+    function enhanceSelect(sel) {
+      if (!sel || sel.tagName !== 'SELECT') return null;
+      if (sel.dataset.enhanced === '1') return sel.closest('.ui-select');
+      // Build wrapper structure
+      const wrap = document.createElement('div'); wrap.className = 'ui-select';
+      // Insert before select, then move select inside
+      sel.parentElement.insertBefore(wrap, sel);
+      wrap.appendChild(sel);
+      // Trigger button
+      const trigger = document.createElement('button');
+      trigger.type = 'button'; trigger.className = 'ui-select-trigger'; trigger.setAttribute('aria-haspopup', 'listbox'); trigger.setAttribute('aria-expanded', 'false');
+      wrap.insertBefore(trigger, sel);
+      // Popup menu
+      const menu = document.createElement('div'); menu.className = 'ui-select-menu'; menu.setAttribute('role', 'listbox');
+      wrap.appendChild(menu);
+      // Initial sync
+      syncTriggerLabel(sel, trigger);
+      buildMenuFromSelect(sel, menu);
+      ensureWrapWidth(sel, wrap);
+      // Track as enhanced
+      sel.dataset.enhanced = '1';
+      // Toggle open
+      function openMenu() {
+        closeAll(wrap);
+        wrap.classList.add(OPEN_CLASS); trigger.setAttribute('aria-expanded', 'true');
+        // Drop-up if not enough viewport space
+        try {
+          const r = wrap.getBoundingClientRect();
+          const spaceBelow = window.innerHeight - r.bottom; const spaceAbove = r.top;
+          if (spaceBelow < 160 && spaceAbove > spaceBelow) menu.classList.add('drop-up'); else menu.classList.remove('drop-up');
+        } catch {}
+        // Scroll to selected
+        try {
+          const cur = menu.querySelector('.ui-select-option[aria-selected="true"]');
+          if (cur) { cur.scrollIntoView({ block: 'nearest' }); }
+        } catch {}
+      }
+      function closeMenu() { wrap.classList.remove(OPEN_CLASS); trigger.setAttribute('aria-expanded', 'false'); }
+      trigger.addEventListener('click', (e) => {
+        if (wrap.classList.contains(OPEN_CLASS)) closeMenu(); else openMenu();
+      });
+      // Keyboard on trigger
+      trigger.addEventListener('keydown', (e) => {
+        const key = e.key;
+        if (key === 'ArrowDown' || key === 'Enter' || key === ' ') { e.preventDefault(); openMenu(); }
+        if (key === 'Escape') { closeMenu(); }
+      });
+      // Close on outside click
+      document.addEventListener('click', (ev) => {
+        if (!wrap.contains(ev.target)) closeMenu();
+      });
+      // Reflect native changes (programmatic or user) into trigger/menu
+      sel.addEventListener('change', () => {
+        syncTriggerLabel(sel, trigger);
+        // update selected indicators
+        const v = sel.value;
+        menu.querySelectorAll('.ui-select-option').forEach(it => it.setAttribute('aria-selected', it.dataset.value === v ? 'true' : 'false'));
+      });
+      // Observe option list changes (e.g., storyPicker init)
+      const mo = new MutationObserver(() => {
+        buildMenuFromSelect(sel, menu);
+        syncTriggerLabel(sel, trigger);
+      });
+      mo.observe(sel, { childList: true, subtree: true, attributes: false });
+      // Keep width responsive on resize
+      window.addEventListener('resize', () => ensureWrapWidth(sel, wrap));
+      // Label click support: clicking <label for> opens menu
+      try {
+        const id = sel.id; if (id) {
+          const lab = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+          if (lab) lab.addEventListener('click', (e) => { e.preventDefault(); trigger.focus(); openMenu(); });
+        }
+      } catch {}
+      return wrap;
+    }
+    function enhanceAll(root = document) {
+      (root.querySelectorAll ? root.querySelectorAll('select') : []).forEach(enhanceSelect);
+    }
+    // Auto-enhance dynamically added selects (e.g., in settings forms)
+    const globalMO = new MutationObserver((ml) => {
+      for (const m of ml) {
+        if (m.type === 'childList') {
+          m.addedNodes.forEach(n => {
+            if (n && n.nodeType === 1) {
+              if (n.tagName === 'SELECT') enhanceSelect(n);
+              else if (n.querySelectorAll) n.querySelectorAll('select').forEach(enhanceSelect);
+            }
+          });
+        }
+      }
+    });
+    function startObserver() {
+      try { globalMO.observe(document.body, { childList: true, subtree: true }); } catch {}
+    }
+    return { enhanceAll, enhanceSelect, closeAll, startObserver };
+  })();
   const MapView = (() => {
     // Read CSS variables to keep canvas in sync with theme
     function cssVar(name, fallback) {
@@ -636,6 +781,9 @@
   }
   // Initialize story picker once at startup
   initStoryPicker();
+  // Enhance selects (after init, also watch async population)
+  SelectUX.enhanceAll(document);
+  SelectUX.startObserver();
 
   // Golden ratio layout: no sizer
 
