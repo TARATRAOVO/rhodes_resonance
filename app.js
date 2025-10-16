@@ -86,6 +86,7 @@
   const cmdHist = [];
   let cmdIdx = -1; // points to next insert position
   let running = false;
+  let paused = false; // soft-pause between actor turns
   const params = new URLSearchParams(location.search);
   const debugMode = params.get('debug') === '1' || params.get('debug') === 'true';
   let lastState = {};
@@ -306,11 +307,11 @@
   function esc(s) { return s.replace(/[<>&]/g, m => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[m])); }
   function scrollToBottom(el) { el.scrollTop = el.scrollHeight; }
   function updateButtons() {
-    // Start 与 Restart：未运行时都可用；运行时 Start 禁用、Restart 可用
-    btnStart.disabled = running;
-    btnStop.disabled = !running;
+    // 软暂停：运行且未暂停 -> Start 禁用/Stop 启用；运行且已暂停 -> Start 启用(用于恢复)/Stop 禁用；未运行 -> Start 启用/Stop 禁用
+    btnStart.disabled = (running && !paused) ? true : false;
+    btnStop.disabled = (!running || paused) ? true : false;
     btnRestart.disabled = false;
-    // Send 按钮仍由等待玩家输入信号控制
+    // 发送按钮仍由等待玩家输入信号控制
   }
 
   function renderHUD(state) {
@@ -544,7 +545,12 @@
           if (typeof obj.last_sequence === 'number') lastSeq = Math.max(lastSeq, obj.last_sequence);
           if (obj.state) { renderHUD(obj.state); if (mapView) mapView.update(obj.state); }
           // 查询一次运行状态，刷新按钮
-          fetch('/api/state').then(r=>r.json()).then(st => { running = !!st.running; updateButtons(); if (running) setStatus('运行中'); }).catch(()=>{});
+          paused = !!obj.paused;
+          fetch('/api/state').then(r=>r.json()).then(st => {
+            running = !!st.running;
+            paused = !!st.paused;
+            updateButtons(); if (running) setStatus(paused ? '已暂停' : '运行中');
+          }).catch(()=>{ updateButtons(); });
           return;
         }
         if (obj.type === 'event' && obj.event) {
@@ -571,9 +577,17 @@
           } catch {}
           return;
         }
+        if (obj.type === 'paused') {
+          paused = true; updateButtons(); setStatus('已暂停');
+          return;
+        }
+        if (obj.type === 'resumed') {
+          paused = false; updateButtons(); setStatus('运行中');
+          return;
+        }
         if (obj.type === 'end') {
           setStatus('已结束');
-          running = false; updateButtons();
+          running = false; paused = false; updateButtons();
           return;
         }
       } catch (e) {}
@@ -599,7 +613,12 @@
       const sid = getSelectedStoryId();
       const res = await fetch('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ story_id: sid || undefined }) });
       if (!res.ok) throw new Error(await res.text());
-      running = true; updateButtons(); setStatus('运行中');
+      let data = {};
+      try { data = await res.json(); } catch {}
+      running = true;
+      // 如果是恢复，则取消暂停标记
+      if (data && data.message === 'resumed') paused = false;
+      updateButtons(); setStatus(paused ? '已暂停' : '运行中');
       if (!ws) connectWS();
       // 已进入运行态
     } catch (e) {
@@ -624,11 +643,10 @@
     btnStop.disabled = true;
     try {
       await postJSON('/api/stop');
-      setStatus('已停止');
+      // 软暂停请求：等待服务器在安全点广播 paused，再更新按钮
+      setStatus('待暂停…');
     } catch (e) {
       alert('终止失败: ' + (e.message || e));
-    } finally {
-      running = false; updateButtons();
     }
   };
 
@@ -702,7 +720,12 @@
   // connect on load to receive any state before clicking Start
   connectWS();
   // 初始化按钮状态（未知运行态 -> 拉一次 state）
-  fetch('/api/state').then(r=>r.json()).then(st => { running = !!st.running; updateButtons(); if (st && st.state) { renderHUD(st.state); if (mapView) mapView.update(st.state); } }).catch(()=>{ updateButtons(); });
+  fetch('/api/state').then(r=>r.json()).then(st => {
+    running = !!st.running; paused = !!st.paused;
+    updateButtons();
+    if (st && st.state) { renderHUD(st.state); if (mapView) mapView.update(st.state); }
+    if (running) setStatus(paused ? '已暂停' : '运行中');
+  }).catch(()=>{ updateButtons(); });
 
   // ==== Settings drawer logic ====
   function drawerOpen() {
