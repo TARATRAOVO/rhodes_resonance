@@ -57,7 +57,6 @@
   const chAppearance = drawer ? drawer.querySelector('#chAppearance') : null;
   const chQuotes = drawer ? drawer.querySelector('#chQuotes') : null;
   const btnAddQuote = drawer ? drawer.querySelector('#btnAddQuote') : null;
-  const chLvl = drawer ? drawer.querySelector('#chLvl') : null;
   const chAC = drawer ? drawer.querySelector('#chAC') : null;
   const chMaxHP = drawer ? drawer.querySelector('#chMaxHP') : null;
   const chMove = drawer ? drawer.querySelector('#chMove') : null;
@@ -69,6 +68,7 @@
   const chCHA = drawer ? drawer.querySelector('#chCHA') : null;
   const chSkills = drawer ? drawer.querySelector('#chSkills') : null;
   const chSaves = drawer ? drawer.querySelector('#chSaves') : null;
+  // Skill/save proficiency UI removed; selectors retained for backward-compat if present
   const btnAddSkill = drawer ? drawer.querySelector('#btnAddSkill') : null;
   const btnAddSave = drawer ? drawer.querySelector('#btnAddSave') : null;
   const chInvTable = drawer ? drawer.querySelector('#chInvTable') : null;
@@ -937,7 +937,7 @@
     if (!cfg.characters[name]) {
       cfg.characters[name] = {
         type: 'npc', persona: '', appearance: '', quotes: [],
-        dnd: { level:1, ac:10, max_hp:8, abilities:{STR:10,DEX:10,CON:10,INT:10,WIS:10,CHA:10}, proficient_skills:[], proficient_saves:[], move_speed:6 },
+        dnd: { ac:10, max_hp:8, abilities:{STR:10,DEX:10,CON:10,INT:10,WIS:10,CHA:10}, move_speed:6 },
         inventory: {}
       };
     }
@@ -957,9 +957,8 @@
       entry.quotes = arr;
       arr.forEach((q, idx) => addListRow(chQuotes, q, v => { entry.quotes[idx] = v; markDirty('characters'); }, () => { entry.quotes.splice(idx,1); fillCharForm(name); markDirty('characters'); }));
     }
-    const dnd = entry.dnd = Object.assign({ level:1, ac:10, max_hp:8, abilities:{}, proficient_skills:[], proficient_saves:[], move_speed:6 }, entry.dnd || {});
+    const dnd = entry.dnd = Object.assign({ ac:10, max_hp:8, abilities:{}, move_speed:6 }, entry.dnd || {});
     const ab = dnd.abilities = Object.assign({STR:10,DEX:10,CON:10,INT:10,WIS:10,CHA:10}, dnd.abilities || {});
-    if (chLvl) chLvl.value = dnd.level != null ? dnd.level : 1;
     if (chAC) chAC.value = dnd.ac != null ? dnd.ac : 10;
     if (chMaxHP) chMaxHP.value = dnd.max_hp != null ? dnd.max_hp : 8;
     if (chMove) chMove.value = dnd.move_speed != null ? dnd.move_speed : (dnd.move_speed_steps != null ? dnd.move_speed_steps : 6);
@@ -969,19 +968,7 @@
     if (chINT) chINT.value = ab.INT != null ? ab.INT : 10;
     if (chWIS) chWIS.value = ab.WIS != null ? ab.WIS : 10;
     if (chCHA) chCHA.value = ab.CHA != null ? ab.CHA : 10;
-    // skills & saves
-    if (chSkills) {
-      chSkills.innerHTML = '';
-      const arr = Array.isArray(dnd.proficient_skills) ? dnd.proficient_skills.slice() : [];
-      dnd.proficient_skills = arr;
-      arr.forEach((s, idx) => addListRow(chSkills, s, v => { dnd.proficient_skills[idx] = String(v||'').toLowerCase(); markDirty('characters'); }, () => { dnd.proficient_skills.splice(idx,1); fillCharForm(name); markDirty('characters'); }));
-    }
-    if (chSaves) {
-      chSaves.innerHTML = '';
-      const arr = Array.isArray(dnd.proficient_saves) ? dnd.proficient_saves.slice() : [];
-      dnd.proficient_saves = arr;
-      arr.forEach((s, idx) => addListRow(chSaves, s, v => { dnd.proficient_saves[idx] = String(v||'').toUpperCase(); markDirty('characters'); }, () => { dnd.proficient_saves.splice(idx,1); fillCharForm(name); markDirty('characters'); }));
-    }
+    // skills & saves removed: no-op UI
     // inventory
     if (chInvTable) {
       const tbody = chInvTable.querySelector('tbody');
@@ -1140,14 +1127,11 @@
       // damage expr
       const tdDmg = document.createElement('td');
       const inDmg = document.createElement('input'); inDmg.type='text'; inDmg.value=(item.damage_expr||''); inDmg.addEventListener('input',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).damage_expr=inDmg.value; markDirty('weapons'); }); tdDmg.appendChild(inDmg);
-      // prof
-      const tdProf = document.createElement('td');
-      const ck = document.createElement('input'); ck.type='checkbox'; ck.checked= !!item.proficient_default; ck.addEventListener('change',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).proficient_default = !!ck.checked; markDirty('weapons'); }); tdProf.appendChild(ck);
       // ops
       const tdOps = document.createElement('td');
       const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.weapons[id]; renderWeaponsForm(cfg.weapons); markDirty('weapons'); };
       tdOps.appendChild(btnDel);
-      tr.appendChild(tdId); tr.appendChild(tdLabel); tr.appendChild(tdReach); tr.appendChild(tdAb); tr.appendChild(tdDmg); tr.appendChild(tdProf); tr.appendChild(tdOps);
+      tr.appendChild(tdId); tr.appendChild(tdLabel); tr.appendChild(tdReach); tr.appendChild(tdAb); tr.appendChild(tdDmg); tr.appendChild(tdOps);
       tbody.appendChild(tr);
     });
     // refresh characters inventory add-select (if visible)
@@ -1219,7 +1203,7 @@
 
   function weaponsCollect() {
     const out = {};
-    // preserve unknown keys per weapon by merging original
+    // preserve unknown keys per weapon by merging original, but drop legacy proficient flag
     const orig = original.weapons || {};
     for (const id of Object.keys(cfg.weapons || {})) {
       const src = cfg.weapons[id] || {};
@@ -1228,7 +1212,8 @@
       base.reach_steps = parseInt(src.reach_steps != null ? src.reach_steps : 1, 10) || 1;
       base.ability = String(src.ability || 'STR').toUpperCase();
       base.damage_expr = (src.damage_expr || '').trim();
-      base.proficient_default = !!src.proficient_default;
+      // no proficient flag anymore
+      if ('proficient_default' in base) delete base.proficient_default;
       out[id] = base;
     }
     return out;
@@ -1459,7 +1444,6 @@
   if (btnAddQuote) btnAddQuote.onclick = ()=>{ if (!chActiveName) return; const e=ensureEntry(chActiveName); if (!Array.isArray(e.quotes)) e.quotes=[]; e.quotes.push(''); fillCharForm(chActiveName); markDirty('characters'); };
   // dnd numeric & abilities
   const bindNum = (el, set) => { if (!el) return; el.addEventListener('input', ()=>{ if (!chActiveName) return; set(); markDirty('characters'); }); };
-  bindNum(chLvl, ()=>{ ensureEntry(chActiveName).dnd.level = parseInt(chLvl.value||'1',10); });
   bindNum(chAC, ()=>{ ensureEntry(chActiveName).dnd.ac = parseInt(chAC.value||'10',10); });
   bindNum(chMaxHP, ()=>{ ensureEntry(chActiveName).dnd.max_hp = parseInt(chMaxHP.value||'8',10); });
   bindNum(chMove, ()=>{ ensureEntry(chActiveName).dnd.move_speed = parseInt(chMove.value||'6',10); });
@@ -1469,8 +1453,7 @@
   bindNum(chINT, ()=>{ ensureEntry(chActiveName).dnd.abilities.INT = parseInt(chINT.value||'10',10); });
   bindNum(chWIS, ()=>{ ensureEntry(chActiveName).dnd.abilities.WIS = parseInt(chWIS.value||'10',10); });
   bindNum(chCHA, ()=>{ ensureEntry(chActiveName).dnd.abilities.CHA = parseInt(chCHA.value||'10',10); });
-  if (btnAddSkill) btnAddSkill.onclick = ()=>{ if (!chActiveName) return; const d=ensureEntry(chActiveName).dnd; if (!Array.isArray(d.proficient_skills)) d.proficient_skills=[]; d.proficient_skills.push(''); fillCharForm(chActiveName); markDirty('characters'); };
-  if (btnAddSave) btnAddSave.onclick = ()=>{ if (!chActiveName) return; const d=ensureEntry(chActiveName).dnd; if (!Array.isArray(d.proficient_saves)) d.proficient_saves=[]; d.proficient_saves.push(''); fillCharForm(chActiveName); markDirty('characters'); };
+  // Skill/save proficiency editing removed
   if (btnAddInv) btnAddInv.onclick = ()=>{
     if (!chActiveName) return;
     const id = chInvIdSel ? String(chInvIdSel.value||'').trim() : '';
@@ -1494,7 +1477,7 @@
     } else {
       if ((cfg.weapons||{})[id]) { alert('已存在同名武器 ID'); return; }
     }
-    (cfg.weapons||(cfg.weapons={}))[id] = { label:'', reach_steps:1, ability:'STR', damage_expr:'1d4+STR', proficient_default:false };
+    (cfg.weapons||(cfg.weapons={}))[id] = { label:'', reach_steps:1, ability:'STR', damage_expr:'1d4+STR' };
     renderWeaponsForm(cfg.weapons); markDirty('weapons');
   };
 })();
