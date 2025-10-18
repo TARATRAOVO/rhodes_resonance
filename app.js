@@ -133,13 +133,13 @@
       try {
         const rect = sel.getBoundingClientRect();
         if (rect && rect.width) wrap.style.width = rect.width + 'px';
-      } catch {}
+      } catch(e){ throw e }
       // table cells or toolbar rows want full width
       try {
         const p = sel.parentElement; const gp = p && p.parentElement;
         if (p && (p.classList.contains('tbl') || p.classList.contains('toolbar-row'))) wrap.classList.add('full');
         if (gp && (gp.classList.contains('tbl') || gp.classList.contains('toolbar-row'))) wrap.classList.add('full');
-      } catch {}
+      } catch(e){ throw e }
     }
     function enhanceSelect(sel) {
       if (!sel || sel.tagName !== 'SELECT') return null;
@@ -171,12 +171,12 @@
           const r = wrap.getBoundingClientRect();
           const spaceBelow = window.innerHeight - r.bottom; const spaceAbove = r.top;
           if (spaceBelow < 160 && spaceAbove > spaceBelow) menu.classList.add('drop-up'); else menu.classList.remove('drop-up');
-        } catch {}
+        } catch(e){ throw e }
         // Scroll to selected
         try {
           const cur = menu.querySelector('.ui-select-option[aria-selected="true"]');
           if (cur) { cur.scrollIntoView({ block: 'nearest' }); }
-        } catch {}
+        } catch(e){ throw e }
       }
       function closeMenu() { wrap.classList.remove(OPEN_CLASS); trigger.setAttribute('aria-expanded', 'false'); }
       trigger.addEventListener('click', (e) => {
@@ -213,7 +213,7 @@
           const lab = document.querySelector(`label[for="${CSS.escape(id)}"]`);
           if (lab) lab.addEventListener('click', (e) => { e.preventDefault(); trigger.focus(); openMenu(); });
         }
-      } catch {}
+      } catch(e){ throw e }
       return wrap;
     }
     function enhanceAll(root = document) {
@@ -233,17 +233,17 @@
       }
     });
     function startObserver() {
-      try { globalMO.observe(document.body, { childList: true, subtree: true }); } catch {}
+      try { globalMO.observe(document.body, { childList: true, subtree: true }); } catch(e){ throw e }
     }
     return { enhanceAll, enhanceSelect, closeAll, startObserver };
   })();
   const MapView = (() => {
     // Read CSS variables to keep canvas in sync with theme
-    function cssVar(name, fallback) {
-      try {
-        const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-        return v || fallback;
-      } catch { return fallback; }
+    function cssVar(name, _fallback_unused) {
+      // no fallback: require CSS variable to be present
+      const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      if (!v) throw new Error(`Missing CSS variable: ${name}`);
+      return v;
     }
     function hashHue(s) {
       let h = 0 >>> 0;
@@ -396,7 +396,7 @@
         const ro = new ResizeObserver(() => mapView.resize());
         ro.observe(mapWrapEl);
       }
-    } catch {}
+    } catch(e){ throw e }
   }
   // Settings editor state
   let activeTab = 'story';
@@ -438,7 +438,7 @@
       if (!storyContainer || !selectedStoryId) return;
       const single = storyCollect();
       storyContainer.stories[selectedStoryId] = single;
-    } catch {}
+    } catch(e){ throw e }
   }
 
   function setStatus(text) { statusEl.textContent = text; }
@@ -503,8 +503,8 @@
       try {
         const pairs = Object.entries(guards).slice(0, 6).map(([k,v])=>`${k}->${v}`);
         if (pairs.length) kv.push(`<span class="pill">守护: ${esc(pairs.join(' | '))}</span>`);
-      } catch {}
-    } catch {}
+      } catch(e){ throw e }
+    } catch(e){ throw e }
     hudEl.innerHTML = kv.join(' ');
   }
 
@@ -526,14 +526,14 @@
       if (local && ids.includes(local)) chosen = local; else if (serverSel && ids.includes(serverSel)) chosen = serverSel; else chosen = (ids[0] || '');
       storyPicker.value = chosen;
       if (chosen && chosen !== serverSel) {
-        try { await fetch('/api/select_story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: chosen }) }); } catch {}
+        try { await fetch('/api/select_story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: chosen }) }); } catch(e){ throw e }
       }
       storyPicker.onchange = async () => {
         const id = getSelectedStoryId();
-        try { localStorage.setItem('storyPicker.selected', id); } catch {}
-        try { await fetch('/api/select_story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); } catch {}
+        try { localStorage.setItem('storyPicker.selected', id); } catch(e){ throw e }
+        try { await fetch('/api/select_story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); } catch(e){ throw e }
       };
-    } catch {}
+    } catch(e){ throw e }
   }
 
   function handleEvent(ev) {
@@ -626,13 +626,7 @@
               const g = params.guardian || '*'; const p = params.protectee || '*';
               return `清除守护 ${g} -> ${p}`;
             }
-          } catch {}
-          // 默认兜底：列出少量参数键值
-          try {
-            const keys = Object.keys(params).slice(0, 3);
-            const kv = keys.map(k => `${k}=${JSON.stringify(params[k])}`).join(', ');
-            return kv;
-          } catch { return ''; }
+          }
         })();
         if (t === 'tool_call') {
           const line = lineEl(`<span class="actor">${esc(actor)}</span> 发起 <b>${esc(label)}</b>${brief ? ' · ' + esc(brief) : ''}`, 'cmd');
@@ -659,13 +653,13 @@
               textOut = keys.map(k => `${k}=${typeof meta[k]==='object'? JSON.stringify(meta[k]): String(meta[k])}`).join(' ');
               textOut = stripReason(textOut);
             }
-          } catch {}
+          } catch(e){ throw e }
           const line = lineEl(`<span class="actor">${esc(actor)}</span> 结果 <b>${esc(label)}</b>${textOut ? ' · ' + esc(textOut) : ''}`, 'out');
           storyEl.appendChild(line);
         }
         if (storyEl.children.length > maxStory) storyEl.removeChild(storyEl.firstChild);
         scrollToBottom(storyEl.parentElement);
-      } catch {}
+      } catch(e){ throw e }
       return;
     }
     if (t === 'error') {
@@ -699,7 +693,7 @@
           return;
         }
         if (obj.type === 'event' && obj.event) {
-          if (debugMode) { try { console.debug('EVT', obj.event); } catch {} }
+          if (debugMode) { try { console.debug('EVT', obj.event); } catch(e){ throw e } }
           handleEvent(obj.event);
           if (running) setStatus('运行中');
           // 如果是等待玩家输入的信号，提示一下，并开启发送按钮
@@ -719,7 +713,7 @@
                 if (cmdPrompt) cmdPrompt.textContent = '>';
               }
             }
-          } catch {}
+          } catch(e){ throw e }
           return;
         }
         if (obj.type === 'paused') {
@@ -735,7 +729,7 @@
           running = false; paused = false; updateButtons();
           return;
         }
-      } catch (e) {}
+      } catch(e){ throw e }
     };
     ws.onclose = () => {
       setStatus('已断开');
@@ -743,7 +737,7 @@
       setTimeout(connectWS, reconnectDelay);
       reconnectDelay = Math.min(maxDelay, reconnectDelay * 2);
     };
-    ws.onerror = () => { try { ws.close(); } catch {} };
+    ws.onerror = () => { try { ws.close(); } catch(e){ throw e } };
   }
 
   async function postJSON(path) {
@@ -759,7 +753,7 @@
       const res = await fetch('/api/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ story_id: sid || undefined }) });
       if (!res.ok) throw new Error(await res.text());
       let data = {};
-      try { data = await res.json(); } catch {}
+      try { data = await res.json(); } catch(e){ throw e }
       running = true;
       // 如果是恢复，则取消暂停标记
       if (data && data.message === 'resumed') paused = false;
@@ -816,7 +810,7 @@
         const st = await (await fetch('/api/state')).json();
         if (st && st.state) { renderHUD(st.state); if (mapView) mapView.update(st.state); }
         running = !!(st && st.running);
-      } catch {}
+      } catch(e){ throw e }
       if (!ws) connectWS();
       updateButtons();
     } catch (e) {
@@ -835,7 +829,7 @@
       const res = await fetch('/api/player_say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, text }) });
       if (!res.ok) throw new Error(await res.text());
       // history push
-      try { if (text && (cmdHist.length === 0 || cmdHist[cmdHist.length-1] !== text)) cmdHist.push(text); cmdIdx = cmdHist.length; } catch {}
+      try { if (text && (cmdHist.length === 0 || cmdHist[cmdHist.length-1] !== text)) cmdHist.push(text); cmdIdx = cmdHist.length; } catch(e){ throw e }
       txtPlayer.value = '';
       playerHint.textContent = '';
       // 发送一次后关闭按钮，直到服务端再次下发等待提示
@@ -1016,7 +1010,7 @@
           const opt = document.createElement('option'); opt.value=wid; opt.textContent=wid; chInvIdSel.appendChild(opt);
         }
       }
-    } catch {}
+    } catch(e){ throw e }
   }
 
   function renderStoryForm(data, stateSnap) {
@@ -1054,7 +1048,7 @@
           pos[nm] = p;
         }
       }
-    } catch {}
+    } catch(e){ throw e }
     cfg.story.initial_positions = pos;
     Object.entries(pos).forEach(([name, arr]) => {
       const tr = document.createElement('tr');
@@ -1086,7 +1080,7 @@
           stPosNameSel.appendChild(opt);
         }
       }
-    } catch {}
+    } catch(e){ throw e }
   }
 
   function renderWeaponsForm(data) {
@@ -1129,7 +1123,7 @@
               }
             }
           }
-        } catch {}
+        } catch(e){ throw e }
         markDirty('weapons');
         // re-render to reflect sorted order and ids
         renderWeaponsForm(cfg.weapons);
@@ -1157,7 +1151,7 @@
       tbody.appendChild(tr);
     });
     // refresh characters inventory add-select (if visible)
-    try { if (chActiveName) fillCharForm(chActiveName); } catch {}
+    try { if (chActiveName) fillCharForm(chActiveName); } catch(e){ throw e }
   }
 
   function renderCharactersForm(data) {
@@ -1190,7 +1184,7 @@
     // Prefer server-selected story if available; otherwise the first id
     let ids = Object.keys(storyContainer.stories||{});
     let serverSelected = '';
-    try { const si = await fetch('/api/stories').then(r=>r.json()); serverSelected = (si && si.selected) || ''; } catch {}
+    try { const si = await fetch('/api/stories').then(r=>r.json()); serverSelected = (si && si.selected) || ''; } catch(e){ throw e }
     selectedStoryId = serverSelected || selectedStoryId || ids[0] || '';
     updateStorySelectUI();
     // Render the selected story into the existing form
@@ -1297,7 +1291,7 @@
             const st = await (await fetch('/api/state')).json();
             if (st && st.state) renderHUD(st.state);
             running = !!(st && st.running);
-          } catch {}
+          } catch(e){ throw e }
           if (!ws) connectWS();
           updateButtons();
         } catch (e) {
@@ -1423,7 +1417,7 @@
         stPosX.value = String(p[0]);
         stPosY.value = String(p[1]);
       }
-    } catch {}
+    } catch(e){ throw e }
   });
   // Characters form events
   if (btnAddChar) btnAddChar.onclick = () => {
@@ -1450,7 +1444,7 @@
         const m = chRelations[a] || {};
         if (m[chActiveName] != null) delete m[chActiveName];
       }
-    } catch {}
+    } catch(e){ throw e }
     const names = Object.keys(cfg.characters||{});
     chActiveName = names[0] || '';
     renderCharList(names);
