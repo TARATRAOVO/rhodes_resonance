@@ -64,8 +64,6 @@
   const chDEX = drawer ? drawer.querySelector('#chDEX') : null;
   const chCON = drawer ? drawer.querySelector('#chCON') : null;
   const chINT = drawer ? drawer.querySelector('#chINT') : null;
-  const chWIS = drawer ? drawer.querySelector('#chWIS') : null;
-  const chCHA = drawer ? drawer.querySelector('#chCHA') : null;
   const chSkills = drawer ? drawer.querySelector('#chSkills') : null;
   const chSaves = drawer ? drawer.querySelector('#chSaves') : null;
   // Skill/save proficiency UI removed; selectors retained for backward-compat if present
@@ -626,7 +624,8 @@
               const g = params.guardian || '*'; const p = params.protectee || '*';
               return `清除守护 ${g} -> ${p}`;
             }
-          }
+          } catch(e) { return ''; }
+          return '';
         })();
         if (t === 'tool_call') {
           const line = lineEl(`<span class="actor">${esc(actor)}</span> 发起 <b>${esc(label)}</b>${brief ? ' · ' + esc(brief) : ''}`, 'cmd');
@@ -937,7 +936,7 @@
     if (!cfg.characters[name]) {
       cfg.characters[name] = {
         type: 'npc', persona: '', appearance: '', quotes: [],
-        dnd: { ac:10, max_hp:8, abilities:{STR:10,DEX:10,CON:10,INT:10,WIS:10,CHA:10}, move_speed:6 },
+        dnd: { ac:10, max_hp:8, abilities:{STR:10,DEX:10,CON:10,INT:10}, move_speed:6 },
         inventory: {}
       };
     }
@@ -958,7 +957,7 @@
       arr.forEach((q, idx) => addListRow(chQuotes, q, v => { entry.quotes[idx] = v; markDirty('characters'); }, () => { entry.quotes.splice(idx,1); fillCharForm(name); markDirty('characters'); }));
     }
     const dnd = entry.dnd = Object.assign({ ac:10, max_hp:8, abilities:{}, move_speed:6 }, entry.dnd || {});
-    const ab = dnd.abilities = Object.assign({STR:10,DEX:10,CON:10,INT:10,WIS:10,CHA:10}, dnd.abilities || {});
+    const ab = dnd.abilities = Object.assign({STR:10,DEX:10,CON:10,INT:10}, dnd.abilities || {});
     if (chAC) chAC.value = dnd.ac != null ? dnd.ac : 10;
     if (chMaxHP) chMaxHP.value = dnd.max_hp != null ? dnd.max_hp : 8;
     if (chMove) chMove.value = dnd.move_speed != null ? dnd.move_speed : (dnd.move_speed_steps != null ? dnd.move_speed_steps : 6);
@@ -966,8 +965,6 @@
     if (chDEX) chDEX.value = ab.DEX != null ? ab.DEX : 10;
     if (chCON) chCON.value = ab.CON != null ? ab.CON : 10;
     if (chINT) chINT.value = ab.INT != null ? ab.INT : 10;
-    if (chWIS) chWIS.value = ab.WIS != null ? ab.WIS : 10;
-    if (chCHA) chCHA.value = ab.CHA != null ? ab.CHA : 10;
     // skills & saves removed: no-op UI
     // inventory
     if (chInvTable) {
@@ -1076,7 +1073,7 @@
     dirty.weapons = false;
     const tbody = wpTable.querySelector('tbody');
     tbody.innerHTML = '';
-    const abilities = ['STR','DEX','CON','INT','WIS','CHA'];
+    const abilities = ['STR','DEX','CON','INT'];
     const ids = Object.keys(cfg.weapons || {});
     ids.forEach((id) => {
       const item = cfg.weapons[id] || {};
@@ -1451,8 +1448,6 @@
   bindNum(chDEX, ()=>{ ensureEntry(chActiveName).dnd.abilities.DEX = parseInt(chDEX.value||'10',10); });
   bindNum(chCON, ()=>{ ensureEntry(chActiveName).dnd.abilities.CON = parseInt(chCON.value||'10',10); });
   bindNum(chINT, ()=>{ ensureEntry(chActiveName).dnd.abilities.INT = parseInt(chINT.value||'10',10); });
-  bindNum(chWIS, ()=>{ ensureEntry(chActiveName).dnd.abilities.WIS = parseInt(chWIS.value||'10',10); });
-  bindNum(chCHA, ()=>{ ensureEntry(chActiveName).dnd.abilities.CHA = parseInt(chCHA.value||'10',10); });
   // Skill/save proficiency editing removed
   if (btnAddInv) btnAddInv.onclick = ()=>{
     if (!chActiveName) return;
