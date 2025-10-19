@@ -83,6 +83,42 @@
   // simple command history for CLI experience
   const cmdHist = [];
   let cmdIdx = -1; // points to next insert position
+  // Backend origin config + API helpers
+  // Allows deploying the static UI separately from the Python backend.
+  // If window.RR.backendOrigin is set (e.g., "https://your-backend.example.com"),
+  // API calls and WebSocket connections will use that origin. Otherwise, same-origin.
+  const RR_CFG = (typeof window !== 'undefined' && window.RR) ? window.RR : {};
+  // Allow URL param override: ?backend=https://api.example.com
+  let __backendOverride = '';
+  try {
+    const p = new URLSearchParams(location.search);
+    const b = String(p.get('backend') || '').trim();
+    if (b) __backendOverride = b.replace(/\/$/, '');
+  } catch (e) { /* ignore */ }
+  const BACKEND_ORIGIN = (__backendOverride
+    || (RR_CFG && typeof RR_CFG.backendOrigin === 'string' && RR_CFG.backendOrigin))
+    ? (__backendOverride || RR_CFG.backendOrigin).replace(/\/$/, '')
+    : '';
+  const BACKEND_URL = (BACKEND_ORIGIN ? new URL(BACKEND_ORIGIN) : null);
+  function withApiBase(path) {
+    try {
+      if (BACKEND_ORIGIN && typeof path === 'string' && path.startsWith('/')) return BACKEND_ORIGIN + path;
+    } catch (e) { /* ignore */ }
+    return path;
+  }
+  // Monkey‑patch fetch so existing fetch('/api/...') calls keep working when deployed separately
+  try {
+    const __origFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
+    if (__origFetch) {
+      window.fetch = (input, init) => {
+        try {
+          if (typeof input === 'string' && input.startsWith('/api/')) return __origFetch(withApiBase(input), init);
+          if (input && typeof input.url === 'string' && input.url.startsWith('/api/')) return __origFetch(withApiBase(input.url), init);
+        } catch (e) { /* ignore and fall through */ }
+        return __origFetch(input, init);
+      };
+    }
+  } catch (e) { /* ignore */ }
   let running = false;
   let paused = false; // soft-pause between actor turns
   const params = new URLSearchParams(location.search);
@@ -671,8 +707,10 @@
   }
 
   function connectWS() {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${proto}://${location.host}/ws/events?since=${lastSeq}`;
+    const wsProto = BACKEND_URL ? (BACKEND_URL.protocol === 'https:' ? 'wss' : 'ws') : (location.protocol === 'https:' ? 'wss' : 'ws');
+    const wsHost = BACKEND_URL ? BACKEND_URL.host : location.host;
+    const basePath = BACKEND_URL ? (BACKEND_URL.pathname || '').replace(/\/$/, '') : '';
+    const url = `${wsProto}://${wsHost}${basePath}/ws/events?since=${lastSeq}`;
     ws = new WebSocket(url);
     setStatus('连接中…');
     ws.onopen = () => { setStatus('已连接'); reconnectDelay = 500; };
