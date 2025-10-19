@@ -106,14 +106,34 @@
     } catch (e) { /* ignore */ }
     return path;
   }
+  // Per-page session: ensure each tab has its own SID and propagate to API/WS
+  let SID = '';
+  try {
+    const u = new URL(location.href);
+    SID = String(u.searchParams.get('sid') || '').trim();
+    if (!SID) {
+      // prefer crypto UUID; fallback to timestamp+rand
+      SID = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : (Date.now().toString(36) + Math.random().toString(36).slice(2));
+      u.searchParams.set('sid', SID);
+      history.replaceState(null, '', u.toString());
+    }
+  } catch (e) { /* ignore */ }
   // Monkey‑patch fetch so existing fetch('/api/...') calls keep working when deployed separately
   try {
     const __origFetch = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : null;
     if (__origFetch) {
       window.fetch = (input, init) => {
         try {
-          if (typeof input === 'string' && input.startsWith('/api/')) return __origFetch(withApiBase(input), init);
-          if (input && typeof input.url === 'string' && input.url.startsWith('/api/')) return __origFetch(withApiBase(input.url), init);
+          // Attach session header for same-origin API calls
+          const attach = (url, init0) => {
+            const nextInit = Object.assign({}, init0 || {});
+            const h = new Headers(nextInit.headers || {});
+            if (SID) h.set('X-Session-ID', SID);
+            nextInit.headers = h;
+            return __origFetch(withApiBase(url), nextInit);
+          };
+          if (typeof input === 'string' && input.startsWith('/api/')) return attach(input, init);
+          if (input && typeof input.url === 'string' && input.url.startsWith('/api/')) return attach(input.url, init);
         } catch (e) { /* ignore and fall through */ }
         return __origFetch(input, init);
       };
@@ -710,7 +730,8 @@
     const wsProto = BACKEND_URL ? (BACKEND_URL.protocol === 'https:' ? 'wss' : 'ws') : (location.protocol === 'https:' ? 'wss' : 'ws');
     const wsHost = BACKEND_URL ? BACKEND_URL.host : location.host;
     const basePath = BACKEND_URL ? (BACKEND_URL.pathname || '').replace(/\/$/, '') : '';
-    const url = `${wsProto}://${wsHost}${basePath}/ws/events?since=${lastSeq}`;
+    const sidQS = SID ? `&sid=${encodeURIComponent(SID)}` : '';
+    const url = `${wsProto}://${wsHost}${basePath}/ws/events?since=${lastSeq}${sidQS}`;
     ws = new WebSocket(url);
     setStatus('连接中…');
     ws.onopen = () => { setStatus('已连接'); reconnectDelay = 500; };
