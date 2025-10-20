@@ -518,6 +518,11 @@
     if (!state || typeof state !== 'object') return;
     const kv = [];
     try {
+      // 显示当前战局 ID（基于选择器的值）
+      try {
+        const sid = getSelectedStoryId && getSelectedStoryId();
+        if (sid) kv.push(`<span class="pill">战局: ${esc(sid)}</span>`);
+      } catch(e){ /* ignore */ }
       const inCombat = !!state.in_combat;
       const round = state.round ?? '';
       kv.push(`<span class="pill">战斗: ${inCombat ? '进行中' : '否'}</span>`);
@@ -582,12 +587,30 @@
       if (chosen && chosen !== serverSel) {
         try { await fetch('/api/select_story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: chosen }) }); } catch(e){ throw e }
       }
+      // 初次选择后，若未运行则请求后台预览并渲染到信息栏/地图
+      try { if (!running) await fetchPreviewAndRender(); } catch(e) { /* ignore */ }
       storyPicker.onchange = async () => {
         const id = getSelectedStoryId();
         try { localStorage.setItem('storyPicker.selected', id); } catch(e){ throw e }
         try { await fetch('/api/select_story', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) }); } catch(e){ throw e }
+        // 切换战局后，若未运行则刷新预览
+        try { if (!running) await fetchPreviewAndRender(); } catch(e) { /* ignore */ }
       };
     } catch(e){ throw e }
+  }
+
+  // 拉取后端预览态（不启动）并渲染
+  async function fetchPreviewAndRender() {
+    const sid = getSelectedStoryId();
+    let url = '/api/preview_state';
+    if (sid) url += `?id=${encodeURIComponent(sid)}`;
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const obj = await res.json();
+    if (obj && obj.state && !running) {
+      renderHUD(obj.state);
+      if (mapView) mapView.update(obj.state);
+    }
   }
 
   function handleEvent(ev) {
@@ -660,8 +683,9 @@
               return `${a} -> ${d} 使用 ${w}`;
             }
             if (tool === 'advance_position') {
-              const n = params.name || actor; const tgt = params.target || {}; const steps = params.steps != null ? params.steps : '';
-              const xy = (tgt && typeof tgt === 'object') ? `(${tgt.x},${tgt.y})` : String(tgt || '');
+              const n = params.name || actor; const tgt = params.target; const steps = params.steps != null ? params.steps : '';
+              // Enforce [x,y] array for display; fall back to raw string if malformed
+              const xy = (Array.isArray(tgt) && tgt.length >= 2) ? `(${tgt[0]},${tgt[1]})` : String(tgt || '');
               return `${n} 向 ${xy} 前进 ${steps} 步`;
             }
             if (tool === 'adjust_relation') {
@@ -925,6 +949,10 @@
     updateButtons();
     if (st && st.state) { renderHUD(st.state); if (mapView) mapView.update(st.state); }
     if (running) setStatus(paused ? '已暂停' : '运行中');
+    // 若未运行且没有有效快照，补一次预览渲染
+    if (!running && (!st || !st.state || !Object.keys(st.state||{}).length)) {
+      fetchPreviewAndRender().catch(()=>{});
+    }
   }).catch(()=>{ updateButtons(); });
 
   // ==== Settings drawer logic ====
@@ -1182,7 +1210,12 @@
       const selAb = document.createElement('select'); abilities.forEach(ab=>{ const opt=document.createElement('option'); opt.value=ab; opt.textContent=ab; selAb.appendChild(opt); }); selAb.value=(String(item.ability||'STR').toUpperCase()); selAb.addEventListener('change',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).ability = selAb.value; markDirty('weapons'); }); tdAb.appendChild(selAb);
       // damage expr
       const tdDmg = document.createElement('td');
-      const inDmg = document.createElement('input'); inDmg.type='text'; inDmg.value=(item.damage_expr||''); inDmg.addEventListener('input',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).damage_expr=inDmg.value; markDirty('weapons'); }); tdDmg.appendChild(inDmg);
+      const inDmg = document.createElement('input');
+      inDmg.type='text';
+      inDmg.placeholder='例如 1d6（不含属性加成）';
+      inDmg.value=(item.damage_expr||'');
+      inDmg.addEventListener('input',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).damage_expr=inDmg.value; markDirty('weapons'); });
+      tdDmg.appendChild(inDmg);
       // ops
       const tdOps = document.createElement('td');
       const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.weapons[id]; renderWeaponsForm(cfg.weapons); markDirty('weapons'); };
@@ -1531,7 +1564,8 @@
     } else {
       if ((cfg.weapons||{})[id]) { alert('已存在同名武器 ID'); return; }
     }
-    (cfg.weapons||(cfg.weapons={}))[id] = { label:'', reach_steps:1, ability:'STR', damage_expr:'1d4+STR' };
+    // 新增武器不再自动填充伤害表达式；留空以提示用户必填
+    (cfg.weapons||(cfg.weapons={}))[id] = { label:'', reach_steps:1, ability:'STR', damage_expr:'' };
     renderWeaponsForm(cfg.weapons); markDirty('weapons');
   };
 })();
