@@ -90,7 +90,16 @@ DEFAULT_RECAP_ACTION_LIMIT = 6
 # System prompt building (tools list + templates)
 DEFAULT_TOOLS_TEXT = "perform_attack(), cast_arts(), advance_position(), adjust_relation(), transfer_item(), set_protection(), clear_protection(), first_aid()"
 
-# --- Default system prompt templates ---
+# Enforce JSON-only replies mode. When enabled, agents must output exactly one
+# JSON object with the shape: {"speech": str, "actions": [{"tool": str, "args": dict}, ...]}.
+# Parsing/execution is switched to this JSON pipeline (CALL_TOOL parsing kept as
+# a compatibility fallback on parse failure only).
+JSON_ONLY_MODE = True
+# If True, when JSON parsing fails we will NOT fall back to legacy CALL_TOOL parsing;
+# the model output will be treated as an error and the turn produces no speech/actions.
+JSON_STRICT_FAIL = True
+
+# --- System prompt templates ---
 DEFAULT_PROMPT_HEADER = (
     "你是：{name}.\n"
     "人设：{persona}\n"
@@ -99,44 +108,32 @@ DEFAULT_PROMPT_HEADER = (
     "当前立场提示（仅你视角）：{relation_brief}\n"
 )
 
-DEFAULT_PROMPT_RULES = (
-    "对话要求：\n"
-    "- 先用中文说1-2句对白/想法/微动作，符合人设。\n"
-    "- 明确指令优先：若本回合的私有提示中出现“优先处理对白”，你应当首先回应，不能忽略或转移话题。\n"
-    '- 当需要执行行动时，直接调用工具（格式：CALL_TOOL tool_name({{"key": "value"}}))。\n'
-    "- 作战规则（硬性）：只能对reach_preview里的“可及目标”使用 perform_attack；若目标不在“可及目标”，必须先用 advance_position 进入触及范围后再发动攻击。\n"
-    "- 有效行动要求：当存在敌对关系（关系<=-10）时，每回合至少进行一次有效行动。\n"
-    "- 行动前对照上方立场提示：≥40 视为亲密同伴（避免攻击、优先支援），≥10 为盟友（若要伤害需先说明理由），≤-10 才视为敌方目标，其余保持谨慎中立。\n"
-    "- 若必须违背既定关系行事或违反作战硬规则，请在对白中说明充分理由，并拒绝执行，同时给出更稳妥的替代行动。\n"
-    '- 不要输出任何"系统提示"或括号内的系统旁白；只输出对白与 CALL_TOOL。\n'
-    "- 参与者名称（仅可用）：{allowed_names}\n"
+# --- JSON-only template (active when JSON_ONLY_MODE=True) ---
+DEFAULT_PROMPT_JSON_INSTRUCTIONS = (
+    "输出要求（严格）：\n"
+    "- 仅输出一个 JSON 对象，不能有任何额外文字/注释/代码块标记；不要使用```json```包裹。\n"
+    # Escape literal braces to avoid str.format treating JSON examples as fields
+    "- 结构：{{\"speech\": string | [string], \"description\": string | [string], \"actions\": [ {{\"tool\": string, \"args\": object}}, ... ] }}。\n"
+    "- speech：1-2句中文对白；禁止括号旁白/系统提示；可留空（例如只行动）。\n"
+    "- description：1-2句中文，用于合并表达想法/微动作/简短旁白。\n"
+    "- actions：如无行动则为 []。如需行动，每个元素：\n"
+    "  * tool 取自：perform_attack, cast_arts, advance_position, adjust_relation, transfer_item, set_protection, clear_protection, first_aid；\n"
+    "  * args 为严格 JSON（双引号）；必须包含简短 reason(≤30字)；\n"
+    "    - 坐标参数使用数组 [x,y] 且为整数；\n"
+    "    - 角色名称仅可使用：{allowed_names}；\n"
+    "- 硬规则：只能对 reach_preview 中的可及目标使用 perform_attack；不满足触及时应先 advance_position。\n"
 )
 
-DEFAULT_PROMPT_TOOL_GUIDE = (
-    "可用工具（必须提供行动理由）：\n"
-    "- perform_attack(attacker, defender, weapon, reason)：使用指定武器发起攻击，仅能对“可及目标”使用。\n"
-    "- cast_arts(attacker, art, target, reason)：施放源石技艺，仅能对“可及目标”使用。\n"
-    "- advance_position(name, target:[x,y], reason)：朝指定坐标接近（自动使用剩余移动力）；target 必须为 [x,y] 数组。\n"
-    "- adjust_relation(a, b, value, reason)：在合适情境下将关系直接设为目标值。\n"
-    "- transfer_item(target, item, n=1, reason)：移交或分配物资。\n"
-    "- set_protection(guardian, protectee, reason)：建立守护关系（guardian 将在相邻且有反应时替代 protectee 承受攻击）。\n"
-    '- clear_protection(guardian="", protectee="", reason)：清除守护关系；可按守护者/被保护者/全部清理。\n'
-    "- first_aid(name, target, reason)：对目标进行急救（First Aid）；成功可稳定濒死（HP至少1）或为新伤回复1点HP。\n"
+DEFAULT_PROMPT_JSON_EXAMPLE = (
+    "输出示例（仅供你参考，不要输出这段文字）：\n"
+    # Escape braces so this example survives str.format
+    '{{\"speech\": [\"阿米娅：小心前方。\"], \"description\": [\"她压低身形，向前探查。\", \"不能让他们受伤。\"], \"actions\": [{{\"tool\": \"advance_position\", \"args\": {{\"name\": \"Amiya\", \"target\": [1,1], \"reason\": \"靠近掩体\"}}}}]}}'
 )
 
-DEFAULT_PROMPT_EXAMPLE = (
-    "输出示例：\n"
-    "阿米娅压低声音：'靠近目标位置。'\n"
-    'CALL_TOOL advance_position({{"name": "Amiya", "target": [1, 1], "reason": "接近掩体"}})\n'
-)
-
-## Removed guard guide/example blocks per request
-
-DEFAULT_PROMPT_TEMPLATE = (
+DEFAULT_PROMPT_JSON_TEMPLATE = (
     DEFAULT_PROMPT_HEADER
-    + DEFAULT_PROMPT_RULES
-    + DEFAULT_PROMPT_TOOL_GUIDE
-    + DEFAULT_PROMPT_EXAMPLE
+    + DEFAULT_PROMPT_JSON_INSTRUCTIONS
+    + DEFAULT_PROMPT_JSON_EXAMPLE
 )
 
 # World summary templates (rendered text; not called "系统提示"避免联想)
@@ -509,7 +506,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         return resp
 
     def perform_skill_check(
-        name, skill, dc=None, advantage: str = "none", reason: str = ""
+        name, skill, reason: str = ""
     ):
         # CoC percentile skill check; dc ignored for compatibility
         resp = world.skill_check_coc(name=name, skill=skill)
@@ -1011,6 +1008,11 @@ class _WorldPort:
     # unified statuses
     list_statuses = staticmethod(world_impl.list_statuses)
     get_action_restrictions = staticmethod(world_impl.get_action_restrictions)
+    # query helpers
+    reaction_available = staticmethod(world_impl.reaction_available)
+    list_adjacent_units = staticmethod(world_impl.list_adjacent_units)
+    reachable_targets_for_weapon = staticmethod(world_impl.reachable_targets_for_weapon)
+    reachable_targets_for_art = staticmethod(world_impl.reachable_targets_for_art)
     # participants and character meta helpers
     set_participants = staticmethod(world_impl.set_participants)
     set_character_meta = staticmethod(world_impl.set_character_meta)
@@ -1096,7 +1098,7 @@ def build_sys_prompt(
         "allowed_names": allowed_names or "Doctor, Amiya",
     }
 
-    # Choose template: provided one (list or str) or the DEFAULT_PROMPT_TEMPLATE
+    # Choose template: provided one (list or str) or the JSON default template
     tpl = None
     if prompt_template is not None:
         try:
@@ -1107,7 +1109,7 @@ def build_sys_prompt(
         except Exception:
             tpl = None
     if tpl is None:
-        tpl = DEFAULT_PROMPT_TEMPLATE
+        tpl = DEFAULT_PROMPT_JSON_TEMPLATE
 
     try:
         return str(tpl.format(**args))
@@ -1116,8 +1118,6 @@ def build_sys_prompt(
         raise
 
 
-# Tool call pattern
-TOOL_CALL_PATTERN = re.compile(r"CALL_TOOL\s+(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
 
 
 # ============================================================
@@ -1207,58 +1207,220 @@ def _extract_json_after(s: str, start_pos: int) -> Tuple[Optional[str], int]:
     return None, start_pos
 
 
-def _parse_tool_calls(text: str) -> List[Tuple[str, dict]]:
-    """Parse CALL_TOOL invocations from agent output.
+## Removed legacy CALL_TOOL parsing; JSON-only protocol in effect.
 
-    Supports both formats:
-    - CALL_TOOL name({json})
-    - CALL_TOOL name\\n{json}
+
+# ============================================================
+# JSON Reply Parsing (when JSON_ONLY_MODE=True)
+# ============================================================
+
+def _extract_top_json(text: str) -> Optional[str]:
+    """Return the first top-level JSON object substring from text, or None.
+
+    This is tolerant to extra prose around the JSON; the agent is instructed to
+    output JSON only, but we defensively extract the first balanced {...} block.
     """
-    calls: List[Tuple[str, dict]] = []
     if not text:
-        return calls
+        return None
+    js, _ = _extract_json_after(str(text), 0)
+    return js
 
-    idx = 0
-    while True:
-        m = TOOL_CALL_PATTERN.search(text, idx)
-        if not m:
-            break
-        name = m.group("name")
-        scan_from = m.end()
-        json_body, end_pos = _extract_json_after(text, scan_from)
-        params: dict = {}
-        if json_body:
+
+def _parse_json_reply(text: str) -> Tuple[List[str], List[str], List[Tuple[str, dict]]]:
+    """Parse a strict JSON reply into (speech_lines, description_lines, actions).
+
+    Expected shape: {
+      "speech": string | [string],
+      "description": string | [string],
+      "actions": [{"tool": str, "args": dict}, ...]
+    }
+    """
+    js = _extract_top_json(text)
+    if not js:
+        raise ValueError("no_json_found")
+    data = json.loads(js)
+    if not isinstance(data, dict):
+        raise ValueError("json_not_object")
+    def _norm_list(val) -> List[str]:
+        if val is None:
+            return []
+        if isinstance(val, str):
+            v = val.strip()
+            return [v] if v else []
+        if isinstance(val, list):
+            out: List[str] = []
+            for x in val:
+                if isinstance(x, str) and x.strip():
+                    out.append(x.strip())
+            return out
+        return []
+
+    speech_lines = _norm_list(data.get("speech"))
+    description_lines = _norm_list(data.get("description"))
+    acts_in = data.get("actions", [])
+    if acts_in is None:
+        acts_in = []
+    if not isinstance(acts_in, list):
+        raise ValueError("actions_not_list")
+    actions: List[Tuple[str, dict]] = []
+    for item in acts_in:
+        if not isinstance(item, dict):
+            continue
+        tool = item.get("tool")
+        args = item.get("args", {})
+        if not isinstance(tool, str) or not tool.strip():
+            continue
+        if not isinstance(args, dict):
+            args = {}
+        actions.append((tool.strip(), dict(args)))
+    return speech_lines, description_lines, actions
+
+
+def _sanitize_speech(text: str, max_lines: int = 2, max_chars: int = 160) -> str:
+    """Trim meta/side-notes and keep the speech concise for broadcast."""
+    s = (text or "").strip()
+    # Remove common bracketed meta snippets (best-effort, shallow)
+    try:
+        s = re.sub(r"[\(（\[][^\)）\]]{0,60}[\)）\]]", "", s)
+        s = s.replace("系统提示", "")
+    except Exception:
+        pass
+    # Keep first N non-empty lines and clamp total length
+    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+    s2 = "\n".join(lines[: max(1, int(max_lines))])
+    return s2[: int(max_chars)].strip()
+
+
+async def _execute_actions_from_json(
+    ctx: "TurnContext",
+    origin_actor: str,
+    actions: List[Tuple[str, dict]],
+    hub: "MsgHub",
+) -> None:
+    """Execute parsed actions (tool, args) with logging and broadcasting, mirroring handle_tool_calls."""
+    for tool_name, params in list(actions or []):
+        phase = f"tool:{tool_name}"
+        func = ctx.tool_dispatch.get(tool_name)
+        if not func:
+            ctx.emit(
+                "error",
+                actor=origin_actor,
+                phase=phase,
+                data={
+                    "message": f"未知工具调用 {tool_name}",
+                    "tool": tool_name,
+                    "params": params,
+                    "error_type": "tool_not_found",
+                },
+            )
+            continue
+        # Ensure reason exists, but keep a slim version out of telemetry params
+        try:
+            if not str(params.get("reason", "")).strip():
+                params["reason"] = "未提供"
+        except Exception:
+            params["reason"] = "未提供"
+        params_slim = dict(params or {})
+        if "reason" in params_slim:
             try:
-                params = json.loads(json_body)
+                del params_slim["reason"]
             except Exception:
-                params = {}
-            calls.append((name, params))
-            idx = end_pos
-        else:
-            idx = scan_from
-    return calls
+                pass
+        ctx.emit(
+            "tool_call",
+            actor=origin_actor,
+            phase=phase,
+            data={"tool": tool_name, "params": params_slim},
+        )
+        try:
+            ctx.action_log.append(
+                {
+                    "actor": origin_actor,
+                    "tool": tool_name,
+                    "type": "call",
+                    "params": dict(params or {}),
+                    "turn": ctx.current_round,
+                }
+            )
+        except Exception:
+            pass
+        try:
+            resp = func(**params)
+        except TypeError as exc:
+            ctx.emit(
+                "error",
+                actor=origin_actor,
+                phase=phase,
+                data={
+                    "message": str(exc),
+                    "tool": tool_name,
+                    "params": params,
+                    "error_type": "invalid_parameters",
+                },
+            )
+            continue
+        except Exception as exc:
+            ctx.emit(
+                "error",
+                actor=origin_actor,
+                phase=phase,
+                data={
+                    "message": str(exc),
+                    "tool": tool_name,
+                    "params": params,
+                    "error_type": exc.__class__.__name__,
+                },
+            )
+            continue
+        text_blocks = getattr(resp, "content", None)
+        lines: List[str] = []
+        if isinstance(text_blocks, list):
+            for blk in text_blocks:
+                if hasattr(blk, "text"):
+                    lines.append(str(getattr(blk, "text", "")))
+                elif isinstance(blk, dict):
+                    lines.append(str(blk.get("text", "")))
+                else:
+                    lines.append(str(blk))
+        meta = getattr(resp, "metadata", None)
+        try:
+            def _strip_reason(t: str) -> str:
+                s = str(t or "")
+                s = re.sub(r"\s*(?:行动)?(?:理由|reason|Reason)[:：][\s\S]*$", "", s).strip()
+                if re.match(r"^(?:行动)?(?:理由|reason|Reason)[:：]", s):
+                    return ""
+                return s
 
-
-def _strip_tool_calls_from_text(text: str) -> str:
-    """Return text with all CALL_TOOL ... {json} segments removed."""
-    if not text:
-        return text
-
-    idx = 0
-    out_parts: List[str] = []
-    while True:
-        m = TOOL_CALL_PATTERN.search(text, idx)
-        if not m:
-            out_parts.append(text[idx:])
-            break
-        out_parts.append(text[idx : m.start()])
-        scan_from = m.end()
-        json_body, end_pos = _extract_json_after(text, scan_from)
-        if json_body:
-            idx = end_pos
-        else:
-            idx = scan_from
-    return "".join(out_parts)
+            lines = [x for x in (_strip_reason(x) for x in lines) if x]
+        except Exception:
+            pass
+        ctx.emit(
+            "tool_result",
+            actor=origin_actor,
+            phase=phase,
+            data={"tool": tool_name, "metadata": meta, "text": lines},
+        )
+        try:
+            ctx.action_log.append(
+                {
+                    "actor": origin_actor,
+                    "tool": tool_name,
+                    "type": "result",
+                    "text": list(lines),
+                    "meta": meta,
+                    "turn": ctx.current_round,
+                }
+            )
+        except Exception:
+            pass
+        if not lines:
+            continue
+        tool_msg = Msg(
+            name=f"{origin_actor}[tool]",
+            content="\n".join(line for line in lines if line),
+            role="assistant",
+        )
+        await bcast(ctx, hub, tool_msg, phase=phase)
 
 
 def _parse_story_positions(raw: Any, target: Dict[str, Tuple[int, int]]) -> None:
@@ -1511,7 +1673,6 @@ def emit_world_state(ctx: TurnContext, turn_val: int) -> None:
 def reach_preview_lines(world: Any, name: str) -> List[str]:
     lines: List[str] = []
     try:
-
         def _fmt_steps(n: int) -> str:
             try:
                 s = int(n)
@@ -1522,50 +1683,29 @@ def reach_preview_lines(world: Any, name: str) -> List[str]:
             return f"{s}步"
 
         snap = world.snapshot() or {}
+        # Ensure actor has a position recorded
         pos_map = snap.get("positions") or {}
-        if not isinstance(pos_map, dict) or str(name) not in pos_map:
+        if str(name) not in (pos_map or {}):
             return lines
-        me_pos = pos_map[str(name)]
-        if not isinstance(me_pos, (list, tuple)) or len(me_pos) < 2:
-            return lines
-        me_xy = (int(me_pos[0]), int(me_pos[1]))
-        scene_units: List[Tuple[str, Tuple[int, int]]] = []
-        for nm, p in (pos_map or {}).items():
-            try:
-                if not isinstance(p, (list, tuple)) or len(p) < 2:
-                    continue
-                scene_units.append((str(nm), (int(p[0]), int(p[1]))))
-            except Exception:
-                continue
 
-        def manhattan(a, b):
-            return abs(int(a[0]) - int(b[0])) + abs(int(a[1]) - int(b[1]))
-
+        # Adjacent units (≤1 步)
         try:
-            adj = []
-            for nm, p in scene_units:
-                if nm == str(name):
-                    continue
-                d = manhattan(me_xy, p)
-                if d <= 1:
-                    adj.append((nm, int(d)))
-            if adj:
-                adj.sort(key=lambda t: (t[1], t[0]))
-                try:
-                    ts = (world.runtime().get("turn_state") or {}).get(
-                        str(name), {}
-                    ) or {}
-                    react_avail = bool(ts.get("reaction_available", True))
-                except Exception:
-                    react_avail = True
-                tail = "（反应：可用）" if react_avail else "（反应：已用）"
-                parts = [f"{nm}({_fmt_steps(d)})" for nm, d in adj]
-                lines.append(REACH_LABEL_ADJ.format(tail=tail) + ", ".join(parts))
+            adj = list(world.list_adjacent_units(name))
         except Exception:
-            pass
+            adj = []
+        if adj:
+            try:
+                react_avail = bool(world.reaction_available(name))
+            except Exception:
+                react_avail = True
+            tail = "（反应：可用）" if react_avail else "（反应：已用）"
+            parts = [f"{nm}({_fmt_steps(d)})" for nm, d in adj]
+            lines.append(REACH_LABEL_ADJ.format(tail=tail) + ", ".join(parts))
+
+        # Weapons: iterate inventory to show per-weapon可及目标
         inv = (snap.get("inventory") or {}).get(str(name), {}) or {}
         wdefs = (snap.get("weapon_defs") or {}) or {}
-        weapons = []
+        weapons: List[Tuple[str, int]] = []
         for wid, cnt in inv.items():
             try:
                 if int(cnt) <= 0:
@@ -1579,29 +1719,22 @@ def reach_preview_lines(world: Any, name: str) -> List[str]:
                 rsteps = int((wdefs[wid_str] or {}).get("reach_steps", 1))
             except Exception:
                 rsteps = 1
-            rsteps = max(1, rsteps)
-            weapons.append((wid_str, rsteps))
+            weapons.append((wid_str, max(1, rsteps)))
         weapons.sort(key=lambda t: (t[1], t[0]))
         for wid, rsteps in weapons:
-            items = []
-            for nm, p in scene_units:
-                try:
-                    d = manhattan(me_xy, p)
-                except Exception:
-                    continue
-                if nm == str(name):
-                    continue
-                if d <= int(rsteps):
-                    items.append((nm, int(d)))
+            try:
+                items = list(world.reachable_targets_for_weapon(name, wid))
+            except Exception:
+                items = []
             if not items:
                 continue
-            items.sort(key=lambda t: (t[1], t[0]))
             parts = [f"{nm}({_fmt_steps(d)})" for nm, d in items]
             lines.append(
                 REACH_LABEL_TARGETS.format(weapon=wid, steps=int(rsteps))
                 + ", ".join(parts)
             )
-        # Arts preview (known arts within range)
+
+        # Arts preview（已知术式，按射程筛选，不考虑 LOS）
         try:
             ch = dict((snap.get("characters") or {}).get(str(name), {}) or {})
             known = list((ch.get("coc") or {}).get("arts_known") or [])
@@ -1609,24 +1742,15 @@ def reach_preview_lines(world: Any, name: str) -> List[str]:
             for aid in known:
                 a = (arts_defs or {}).get(str(aid)) or {}
                 rsteps = int(a.get("range_steps", 6) or 6)
-                items = []
-                for nm, p in scene_units:
-                    if nm == str(name):
-                        continue
-                    try:
-                        d = manhattan(me_xy, p)
-                    except Exception:
-                        continue
-                    if d <= rsteps:
-                        items.append((nm, int(d)))
+                try:
+                    items = list(world.reachable_targets_for_art(name, str(aid)))
+                except Exception:
+                    items = []
                 if not items:
                     continue
-                items.sort(key=lambda t: (t[1], t[0]))
                 parts = [f"{nm}({_fmt_steps(d)})" for nm, d in items]
-                # Use internal id for consistency with action/tool calls
-                art_name = str(aid)
                 lines.append(
-                    REACH_LABEL_ARTS.format(art=art_name, steps=rsteps)
+                    REACH_LABEL_ARTS.format(art=str(aid), steps=int(rsteps))
                     + ", ".join(parts)
                 )
         except Exception:
@@ -1682,200 +1806,7 @@ def make_ephemeral_agent(
     return agent
 
 
-async def handle_tool_calls(ctx: TurnContext, origin: Msg, hub: MsgHub):
-    text = _safe_text(origin)
-    tool_calls = _parse_tool_calls(text)
-    if not tool_calls:
-        return
-    for tool_name, params in tool_calls:
-        phase = f"tool:{tool_name}"
-        # Soft-accept a pseudo tool `generate_response` without exposing it in toolkit/prompt.
-        # We log it but by default do NOT broadcast its text to avoid duplicating the narrative
-        # already printed from the cleaned message. This keeps the tool usable without suggesting it.
-        if str(tool_name) == "generate_response":
-            # Extract optional text and reason
-            try:
-                t = ""
-                if isinstance(params, dict):
-                    t = str(
-                        params.get("response")
-                        or params.get("text")
-                        or params.get("message")
-                        or ""
-                    )
-            except Exception:
-                t = ""
-            try:
-                reason_text = str((params or {}).get("reason", "")).strip() or "未提供"
-            except Exception:
-                reason_text = "未提供"
-
-            # Emit a slim tool_call record (avoid logging full text body)
-            ctx.emit(
-                "tool_call",
-                actor=origin.name,
-                phase=phase,
-                data={"tool": tool_name, "params": {"text_len": len(t) if t else 0}},
-            )
-            try:
-                ctx.action_log.append(
-                    {
-                        "actor": origin.name,
-                        "tool": tool_name,
-                        "type": "call",
-                        "params": {"text_len": len(t) if t else 0, "reason": reason_text},
-                        "turn": ctx.current_round,
-                    }
-                )
-            except Exception:
-                pass
-
-            meta = {"ok": True, "call_reason": reason_text, "text_len": len(t) if t else 0}
-            ctx.emit(
-                "tool_result",
-                actor=origin.name,
-                phase=phase,
-                data={"tool": tool_name, "metadata": meta, "text": []},
-            )
-            try:
-                ctx.action_log.append(
-                    {
-                        "actor": origin.name,
-                        "tool": tool_name,
-                        "type": "result",
-                        "text": [],
-                        "meta": meta,
-                        "turn": ctx.current_round,
-                    }
-                )
-            except Exception:
-                pass
-            # Do not broadcast content from this pseudo tool by default.
-            continue
-        func = ctx.tool_dispatch.get(tool_name)
-        if not func:
-            ctx.emit(
-                "error",
-                actor=origin.name,
-                phase=phase,
-                data={
-                    "message": f"未知工具调用 {tool_name}",
-                    "tool": tool_name,
-                    "params": params,
-                    "error_type": "tool_not_found",
-                },
-            )
-            continue
-        # 参数与参与者校验已下沉至 world 的 validated_tool_dispatch；这里不再做 name/participants 检查。
-        try:
-            if not str(params.get("reason", "")).strip():
-                params["reason"] = "未提供"
-        except Exception:
-            params["reason"] = "未提供"
-        params_slim = dict(params or {})
-        if "reason" in params_slim:
-            try:
-                del params_slim["reason"]
-            except Exception:
-                pass
-        ctx.emit(
-            "tool_call",
-            actor=origin.name,
-            phase=phase,
-            data={"tool": tool_name, "params": params_slim},
-        )
-        try:
-            ctx.action_log.append(
-                {
-                    "actor": origin.name,
-                    "tool": tool_name,
-                    "type": "call",
-                    "params": dict(params or {}),
-                    "turn": ctx.current_round,
-                }
-            )
-        except Exception:
-            pass
-        try:
-            resp = func(**params)
-        except TypeError as exc:
-            ctx.emit(
-                "error",
-                actor=origin.name,
-                phase=phase,
-                data={
-                    "message": str(exc),
-                    "tool": tool_name,
-                    "params": params,
-                    "error_type": "invalid_parameters",
-                },
-            )
-            continue
-        except Exception as exc:
-            ctx.emit(
-                "error",
-                actor=origin.name,
-                phase=phase,
-                data={
-                    "message": str(exc),
-                    "tool": tool_name,
-                    "params": params,
-                    "error_type": exc.__class__.__name__,
-                },
-            )
-            continue
-        text_blocks = getattr(resp, "content", None)
-        lines: List[str] = []
-        if isinstance(text_blocks, list):
-            for blk in text_blocks:
-                if hasattr(blk, "text"):
-                    lines.append(str(getattr(blk, "text", "")))
-                elif isinstance(blk, dict):
-                    lines.append(str(blk.get("text", "")))
-                else:
-                    lines.append(str(blk))
-        meta = getattr(resp, "metadata", None)
-        try:
-
-            def _strip_reason(t: str) -> str:
-                s = str(t or "")
-                s = re.sub(
-                    r"\s*(?:行动)?(?:理由|reason|Reason)[:：][\s\S]*$", "", s
-                ).strip()
-                if re.match(r"^(?:行动)?(?:理由|reason|Reason)[:：]", s):
-                    return ""
-                return s
-
-            lines = [x for x in (_strip_reason(x) for x in lines) if x]
-        except Exception:
-            pass
-        ctx.emit(
-            "tool_result",
-            actor=origin.name,
-            phase=phase,
-            data={"tool": tool_name, "metadata": meta, "text": lines},
-        )
-        try:
-            ctx.action_log.append(
-                {
-                    "actor": origin.name,
-                    "tool": tool_name,
-                    "type": "result",
-                    "text": list(lines),
-                    "meta": meta,
-                    "turn": ctx.current_round,
-                }
-            )
-        except Exception:
-            pass
-        if not lines:
-            continue
-        tool_msg = Msg(
-            name=f"{origin.name}[tool]",
-            content="\n".join(line for line in lines if line),
-            role="assistant",
-        )
-        await bcast(ctx, hub, tool_msg, phase=phase)
+## Removed legacy handle_tool_calls; JSON-only protocol in effect.
 
 
 def recap_for(ctx: TurnContext, name: str) -> Optional[Msg]:
@@ -1980,22 +1911,62 @@ async def npc_ephemeral_say(
                 f.write("\n".join(lines))
         except Exception:
             pass
-    out = await ephemeral(None)
+    try:
+        out = await ephemeral(None)
+    except Exception as exc:
+        # Emit a clear error event for frontend diagnostics
+        try:
+            ctx.emit(
+                "error",
+                actor=name,
+                phase="agent-call",
+                data={"message": f"agent_call_failed: {exc}", "error_type": "agent_call_failed"},
+            )
+        except Exception:
+            pass
+        return
     try:
         raw_text = _safe_text(out)
-        cleaned = _strip_tool_calls_from_text(raw_text)
-        if cleaned and cleaned.strip():
-            msg_clean = Msg(
-                getattr(out, "name", name),
-                cleaned,
-                getattr(out, "role", "assistant") or "assistant",
-            )
-            await bcast(ctx, hub, msg_clean, phase=f"npc:{name}")
-        else:
-            await bcast(ctx, hub, out, phase=f"npc:{name}")
+        if JSON_ONLY_MODE:
+            try:
+                speech_lines, description_lines, actions = _parse_json_reply(raw_text)
+            except Exception as exc:
+                # Emit parse error, then fall back to legacy text + CALL_TOOL parsing
+                try:
+                    ctx.emit(
+                        "error",
+                        actor=name,
+                        phase="json-parse",
+                        data={"message": f"json_parse_failed: {exc}", "error_type": "json_parse_error"},
+                    )
+                except Exception:
+                    pass
+                if JSON_ONLY_MODE and JSON_STRICT_FAIL:
+                    # Strict mode: do not proceed with legacy parsing
+                    return
+            else:
+                # Sequentially broadcast speech, description (each up to 2 lines)
+                role_val = getattr(out, "role", "assistant") or "assistant"
+                for ln in (speech_lines or [])[:2]:
+                    st = _sanitize_speech(ln)
+                    if not st:
+                        continue
+                    msg_clean = Msg(getattr(out, "name", name), st, role_val)
+                    await bcast(ctx, hub, msg_clean, phase=f"npc:{name}/speech")
+                for ln in (description_lines or [])[:2]:
+                    st = _sanitize_speech(ln)
+                    if not st:
+                        continue
+                    msg_clean = Msg(getattr(out, "name", name), st, role_val)
+                    await bcast(ctx, hub, msg_clean, phase=f"npc:{name}/desc")
+                # Execute actions strictly from JSON
+                await _execute_actions_from_json(ctx, name, actions, hub)
+                return
+        # Legacy flow disabled in strict JSON mode
+        await bcast(ctx, hub, out, phase=f"npc:{name}")
     except Exception:
         await bcast(ctx, hub, out, phase=f"npc:{name}")
-    await handle_tool_calls(ctx, out, hub)
+    # Legacy CALL_TOOL handling removed in JSON strict mode
 
 
 async def run_demo(

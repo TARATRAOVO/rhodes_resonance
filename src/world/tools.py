@@ -198,6 +198,120 @@ WORLD = World()
 
 # --- tools ---
 
+# ---- Query helpers (pure data; no narration) ----
+def reaction_available(name: str) -> bool:
+    """Return whether the actor still has their Reaction available this round.
+
+    Defaults to True when turn_state is uninitialised to keep preview permissive.
+    """
+    try:
+        st = WORLD.turn_state.get(str(name), {})
+        return bool(st.get("reaction_available", True))
+    except Exception:
+        return True
+
+
+def list_adjacent_units(name: str) -> List[Tuple[str, int]]:
+    """Return units within 1 step (Manhattan) of `name` as (unit, steps).
+
+    - Excludes self; ignores participants gating (consistent with prior preview).
+    - Returns a list sorted by (steps, name).
+    """
+    me = WORLD.positions.get(str(name))
+    if not (isinstance(me, tuple) or isinstance(me, list)):
+        return []
+    mx, my = int(me[0]), int(me[1])
+    out: List[Tuple[str, int]] = []
+    for nm, pos in (WORLD.positions or {}).items():
+        if str(nm) == str(name):
+            continue
+        if not (isinstance(pos, tuple) or isinstance(pos, list)):
+            continue
+        try:
+            d = abs(mx - int(pos[0])) + abs(my - int(pos[1]))
+        except Exception:
+            continue
+        if d <= 1:
+            out.append((str(nm), int(d)))
+    out.sort(key=lambda t: (t[1], t[0]))
+    return out
+
+
+def reachable_targets_for_weapon(attacker: str, weapon: str) -> List[Tuple[str, int]]:
+    """Return targets within weapon reach (steps) for `attacker`.
+
+    - Requires attacker position and weapon definition; if attacker lacks the
+      weapon in inventory (count <= 0), returns empty list (consistent with preview).
+    - Ignores participants gating and guard interception by design (preview only).
+    - Returns list sorted by (steps, name).
+    """
+    att = str(attacker)
+    pos_a = WORLD.positions.get(att)
+    if not (isinstance(pos_a, tuple) or isinstance(pos_a, list)):
+        return []
+    wid = str(weapon)
+    wdef = (WORLD.weapon_defs or {}).get(wid)
+    if not isinstance(wdef, dict):
+        return []
+    try:
+        reach_steps = max(1, int(wdef.get("reach_steps", DEFAULT_REACH_STEPS)))
+    except Exception:
+        reach_steps = int(DEFAULT_REACH_STEPS)
+    # Ownership gate for preview (match main's previous behavior)
+    bag = dict(WORLD.inventory.get(att, {}) or {})
+    try:
+        if int(bag.get(wid, 0)) <= 0:
+            return []
+    except Exception:
+        return []
+    ax, ay = int(pos_a[0]), int(pos_a[1])
+    out: List[Tuple[str, int]] = []
+    for nm, pos in (WORLD.positions or {}).items():
+        if str(nm) == att:
+            continue
+        if not (isinstance(pos, tuple) or isinstance(pos, list)):
+            continue
+        try:
+            d = abs(ax - int(pos[0])) + abs(ay - int(pos[1]))
+        except Exception:
+            continue
+        if d <= reach_steps:
+            out.append((str(nm), int(d)))
+    out.sort(key=lambda t: (t[1], t[0]))
+    return out
+
+
+def reachable_targets_for_art(attacker: str, art: str) -> List[Tuple[str, int]]:
+    """Return targets within art range (steps) for `attacker`.
+
+    - Uses arts_defs.range_steps; ignores LOS/participants/guards (preview only).
+    - Returns list sorted by (steps, name).
+    """
+    att = str(attacker)
+    pos_a = WORLD.positions.get(att)
+    if not (isinstance(pos_a, tuple) or isinstance(pos_a, list)):
+        return []
+    ad = (WORLD.arts_defs or {}).get(str(art)) or {}
+    try:
+        rng = max(1, int(ad.get("range_steps", 6)))
+    except Exception:
+        rng = 6
+    ax, ay = int(pos_a[0]), int(pos_a[1])
+    out: List[Tuple[str, int]] = []
+    for nm, pos in (WORLD.positions or {}).items():
+        if str(nm) == att:
+            continue
+        if not (isinstance(pos, tuple) or isinstance(pos, list)):
+            continue
+        try:
+            d = abs(ax - int(pos[0])) + abs(ay - int(pos[1]))
+        except Exception:
+            continue
+        if d <= rng:
+            out.append((str(nm), int(d)))
+    out.sort(key=lambda t: (t[1], t[0]))
+    return out
+
 def reset_world() -> None:
     """Reset the global WORLD to a fresh, empty instance.
 
@@ -1207,76 +1321,10 @@ def pop_triggers() -> List[Dict[str, Any]]:
     return out
 
 
-def get_ac(name: str) -> int:
-    try:
-        return int(WORLD.characters.get(str(name), {}).get("ac", 10))
-    except Exception:
-        return 10
-
-
-def cover_bonus(name: str) -> Tuple[int, bool]:
-    """Return (ac_bonus, total_cover_blocked)."""
-    c = get_cover(name)
-    if c == "half":
-        return 2, False
-    if c == "three_quarters":
-        return 5, False
-    if c == "total":
-        return 0, True
-    return 0, False
-
-
-def advantage_for_attack(attacker: str, defender: str) -> str:
-    """Advantage calculation simplified: state-based modifiers removed.
-    Always return 'none'.
-    """
-    return "none"
+# DnD遗留移除：不再提供 AC/掩体加值/优势相关接口。
 
 
 # ---- Standard actions (thin wrappers) ----
-def act_dash(name: str):
-    nm = str(name)
-    # Gate by statuses (dash counts as moving this turn)
-    blocked, msg = _blocked_action(nm, "move")
-    if blocked:
-        return ToolResponse(content=[TextBlock(type="text", text=msg)], metadata={"ok": False})
-    use_action(nm, "action")
-    st = WORLD.turn_state.setdefault(nm, {})
-    spd_steps = int(WORLD.speeds.get(nm, _default_move_steps()))
-    st["move_left"] = int(st.get("move_left", spd_steps)) + spd_steps
-    return ToolResponse(
-        content=[TextBlock(type="text", text=f"{nm} 冲刺（移动力+{format_distance_steps(spd_steps)}）")],
-        metadata={"ok": True, "move_left_steps": st["move_left"]}
-    )
-
-
-def act_disengage(name: str):
-    nm = str(name)
-    # Gate by statuses (disengage is a movement-related action)
-    blocked, msg = _blocked_action(nm, "move")
-    if blocked:
-        return ToolResponse(content=[TextBlock(type="text", text=msg)], metadata={"ok": False})
-    use_action(nm, "action")
-    st = WORLD.turn_state.setdefault(nm, {})
-    st["disengage"] = True
-    return ToolResponse(content=[TextBlock(type="text", text=f"{nm} 脱离接触（本回合移动不引发借机攻击）")], metadata={"ok": True})
-
-
-# Removed: explicit Dodge action. Dodge is no longer modeled as a state/token.
-
-
-def act_help(name: str, target: str):
-    nm = str(name)
-    # Gate generic actions under control statuses
-    blocked, msg = _blocked_action(nm, "action")
-    if blocked:
-        return ToolResponse(content=[TextBlock(type="text", text=msg)], metadata={"ok": False})
-    use_action(nm, "action")
-    st = WORLD.turn_state.setdefault(nm, {})
-    st["help_target"] = str(target)
-    return ToolResponse(content=[TextBlock(type="text", text=f"{nm} 协助 {target}（其下一次检定或攻击获得优势）")], metadata={"ok": True, "target": target})
-
-
 def act_hide(name: str, dc: int = 13):
     # CoC: Perform Stealth check; ignore DC, use skill value.
     # State system trimmed: no longer applies 'hidden' condition.
@@ -1330,23 +1378,7 @@ def contest(a: str, a_skill: str, b: str, b_skill: str) -> ToolResponse:
     return ToolResponse(content=[TextBlock(type="text", text=text)], metadata={"a": a_meta, "b": b_meta, "winner": winner})
 
 
-def act_grapple(attacker: str, defender: str) -> ToolResponse:
-    # State system trimmed: contest still rolls, but no status applied on success.
-    res = contest(attacker, "athletics", defender, "athletics")
-    winner = res.metadata.get("winner") if res.metadata else None
-    out = list(res.content or [])
-    return ToolResponse(content=out, metadata={"ok": winner == attacker})
-
-
-"""act_shove removed along with range band system."""
-
-
-def act_ready(name: str, trigger: str, reaction_action: Dict[str, Any]) -> ToolResponse:
-    nm = str(name)
-    use_action(nm, "action")
-    st = WORLD.turn_state.setdefault(nm, {})
-    st["ready"] = {"trigger": str(trigger or ""), "action": dict(reaction_action or {})}
-    return ToolResponse(content=[TextBlock(type="text", text=f"{nm} 预备：{trigger}")], metadata={"ok": True})
+"""act_dash/act_disengage/act_help/act_grapple/act_ready 已删除：避免 DnD 动作命名残留。"""
 
 
 # ---- Character/stat tools ----
@@ -1867,54 +1899,7 @@ def skill_check_coc(name: str, skill: str, *, value: Optional[int] = None, diffi
     })
 
 
-def resolve_melee_attack(attacker: str, defender: str, atk_mod: int = 0, dc: int = 12, dmg_expr: str = "1d4", advantage: str = "none"):
-    """Resolve a simple melee attack: d20+atk_mod vs DC, on success apply damage.
-
-    Args:
-        attacker: 攻击发起者名字
-        defender: 防御者名字
-        atk_mod: 攻击加值（如力量/技巧）
-        dc: 防御难度（DC）
-        dmg_expr: 伤害骰表达式（如 1d4, 1d6+1）
-        advantage: 'none'|'advantage'|'disadvantage'
-    """
-    # Protection interception (treat as melee, reach 1 step)
-    pre_logs: List[TextBlock] = []
-    guard_meta: Optional[Dict[str, Any]] = None
-    new_defender, meta_guard, pre = _resolve_guard_interception(attacker, defender, reach_steps=1)
-    if new_defender != defender:
-        defender = new_defender
-    if pre:
-        pre_logs.extend(pre)
-    if meta_guard:
-        guard_meta = dict(meta_guard)
-
-    # Attack roll
-    atk_res = skill_check(target=int(dc), modifier=int(atk_mod), advantage=advantage)
-    success = bool(atk_res.metadata.get("success")) if atk_res.metadata else False
-    parts: List[TextBlock] = list(pre_logs)
-    # Describe the attack roll
-    parts.append(TextBlock(type="text", text=f"攻击检定：{attacker} d20+{int(atk_mod)} vs DC {int(dc)} -> {'成功' if success else '失败'}"))
-    if success:
-        # Damage roll (reuse roll_dice)
-        dmg_res = roll_dice(dmg_expr)
-        total = int(dmg_res.metadata.get("total", 0)) if dmg_res.metadata else 0
-        # Apply damage
-        dmg_apply = damage(defender, total)
-        # Aggregate logs
-        parts.append(TextBlock(type="text", text=f"伤害掷骰 {dmg_expr} -> {total}"))
-        # Append the damage text line
-        if dmg_apply.content:
-            for blk in dmg_apply.content:
-                if blk.get("type") == "text":
-                    parts.append(blk)
-    out_meta = {
-        "attacker": attacker,
-        "defender": defender,
-        "attack": atk_res.metadata,
-        **({"guard": guard_meta} if guard_meta else {}),
-    }
-    return ToolResponse(content=parts, metadata=out_meta)
+# DnD遗留移除：不再提供 d20/DC 风格的近战求解（统一走 attack_with_weapon）。
 
 
 def get_stat_block(name: str) -> ToolResponse:

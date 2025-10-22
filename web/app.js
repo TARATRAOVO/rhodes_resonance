@@ -743,8 +743,11 @@
       return;
     }
     if (t === 'error') {
-      const msg = (ev.data && ev.data.message) || 'error';
-      storyEl.appendChild(lineEl(`error: ${esc(String(msg))}`, 'error'));
+      const msg = (ev.message != null ? ev.message : (ev.data && ev.data.message)) || 'error';
+      const et = (ev.error_type != null ? ev.error_type : (ev.data && ev.data.error_type)) || '';
+      const ph = ev.phase || '';
+      const tail = `${et ? ` (${et})` : ''}${ph ? ` [${ph}]` : ''}`;
+      storyEl.appendChild(lineEl(`error${tail}: ${esc(String(msg))}`, 'error'));
       if (storyEl.children.length > maxStory) storyEl.removeChild(storyEl.firstChild);
       scrollToBottom(storyEl.parentElement);
       return;
