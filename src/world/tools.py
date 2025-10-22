@@ -530,7 +530,10 @@ def set_guard(guardian: str, protectee: str) -> ToolResponse:
     g = str(guardian)
     blocked, msg = _blocked_action(g, "action")
     if blocked:
-        return ToolResponse(content=[TextBlock(type="text", text=msg)], metadata={"ok": False})
+        return ToolResponse(
+            content=[TextBlock(type="text", text=msg)],
+            metadata={"ok": False, "error_type": "attacker_unable", "actor": g}
+        )
     p = str(protectee)
     lst = WORLD.guardians.setdefault(p, [])
     if g not in lst:
@@ -754,7 +757,7 @@ def derive_move_speed_steps(name: str) -> ToolResponse:
         # 无 CoC 面板时不做其他回退，直接报错信息
         return ToolResponse(
             content=[TextBlock(type="text", text=f"速度派生失败：{nm} 缺少 CoC 特性（characteristics）")],
-            metadata={"ok": False, "name": nm, "error": "no_coc_characteristics"},
+            metadata={"ok": False, "error_type": "no_coc_characteristics", "name": nm},
         )
     dex = int(ch.get("DEX", 50))
     str_v = int(ch.get("STR", 50))
@@ -837,7 +840,14 @@ def move_towards(name: str, target: Tuple[int, int], steps: Optional[int] = None
     if blocked:
         return ToolResponse(
             content=[TextBlock(type="text", text=msg)],
-            metadata={"ok": False, "moved": 0, "position": list(pos), "blocked": True},
+            metadata={
+                "ok": False,
+                "error_type": "attacker_unable",
+                "moved": 0,
+                "position": list(pos),
+                "blocked": True,
+                "actor": str(name),
+            },
         )
     # Determine how many steps are allowed for this move
     nm = str(name)
@@ -1005,7 +1015,7 @@ def set_speed(name: str, value: float = DEFAULT_MOVE_SPEED_STEPS, unit: str = "s
     """
     return ToolResponse(
         content=[TextBlock(type="text", text=f"速度设定被禁用：{name} 的移动力由 CoC 派生，仅可通过数值变动间接影响。")],
-        metadata={"ok": False, "name": str(name), "reason": "speed_derived_from_coc"},
+        metadata={"ok": False, "error_type": "disabled", "name": str(name), "reason": "speed_derived_from_coc"},
     )
 
 
@@ -1111,11 +1121,11 @@ def next_turn():
     - If no alive actors exist, preserves indices and reports accordingly.
     """
     if not WORLD.in_combat or not WORLD.initiative_order:
-        return ToolResponse(content=[TextBlock(type="text", text="未处于战斗中")], metadata={"ok": False, "in_combat": False})
+        return ToolResponse(content=[TextBlock(type="text", text="未处于战斗中")], metadata={"ok": False, "error_type": "not_in_combat", "in_combat": False})
 
     order = WORLD.initiative_order
     if not order:
-        return ToolResponse(content=[TextBlock(type="text", text="未处于战斗中")], metadata={"ok": False, "in_combat": False})
+        return ToolResponse(content=[TextBlock(type="text", text="未处于战斗中")], metadata={"ok": False, "error_type": "not_in_combat", "in_combat": False})
 
     prev_idx = int(WORLD.turn_idx)
     n = len(order)
@@ -1135,7 +1145,7 @@ def next_turn():
     if chosen_idx is None:
         # No alive participants; nothing to do
         note = TextBlock(type="text", text="[系统] 无可行动单位（全部倒地或未登记）")
-        return ToolResponse(content=[note], metadata={"round": WORLD.round, "actor": None, "ok": False})
+        return ToolResponse(content=[note], metadata={"round": WORLD.round, "actor": None, "ok": False, "error_type": "no_actor_available"})
 
     WORLD.turn_idx = chosen_idx
     if wrapped:
@@ -1182,23 +1192,23 @@ def use_action(name: str, kind: str = "action") -> ToolResponse:
     st = WORLD.turn_state.setdefault(nm, {})
     if kind == "action":
         if st.get("action_used"):
-            return ToolResponse(content=[TextBlock(type="text", text=f"[已用] {nm} 本回合动作已用完")], metadata={"ok": False})
+            return ToolResponse(content=[TextBlock(type="text", text=f"[已用] {nm} 本回合动作已用完")], metadata={"ok": False, "error_type": "resource_spent", "kind": kind})
         st["action_used"] = True
         WORLD._touch()
         return ToolResponse(content=[TextBlock(type="text", text=f"{nm} 使用 动作")], metadata={"ok": True})
     if kind == "bonus":
         if st.get("bonus_used"):
-            return ToolResponse(content=[TextBlock(type="text", text=f"[已用] {nm} 本回合附赠动作已用完")], metadata={"ok": False})
+            return ToolResponse(content=[TextBlock(type="text", text=f"[已用] {nm} 本回合附赠动作已用完")], metadata={"ok": False, "error_type": "resource_spent", "kind": kind})
         st["bonus_used"] = True
         WORLD._touch()
         return ToolResponse(content=[TextBlock(type="text", text=f"{nm} 使用 附赠动作")], metadata={"ok": True})
     if kind == "reaction":
         if not st.get("reaction_available", True):
-            return ToolResponse(content=[TextBlock(type="text", text=f"[已用] {nm} 本轮反应不可用")], metadata={"ok": False})
+            return ToolResponse(content=[TextBlock(type="text", text=f"[已用] {nm} 本轮反应不可用")], metadata={"ok": False, "error_type": "resource_spent", "kind": kind})
         st["reaction_available"] = False
         WORLD._touch()
         return ToolResponse(content=[TextBlock(type="text", text=f"{nm} 使用 反应")], metadata={"ok": True})
-    return ToolResponse(content=[TextBlock(type="text", text=f"未知动作类型 {kind}")], metadata={"ok": False})
+    return ToolResponse(content=[TextBlock(type="text", text=f"未知动作类型 {kind}")], metadata={"ok": False, "error_type": "unknown_action"})
 
 
 def consume_movement(name: str, distance_steps: float) -> ToolResponse:
@@ -1218,7 +1228,7 @@ def consume_movement(name: str, distance_steps: float) -> ToolResponse:
         st["move_left"] = 0
         return ToolResponse(
             content=[TextBlock(type="text", text=f"{nm} 试图移动 {format_distance_steps(steps)}，但仅剩 {format_distance_steps(left)}；按剩余移动结算")],
-            metadata={"ok": False, "left_steps": 0, "attempted_steps": steps},
+            metadata={"ok": False, "error_type": "insufficient_movement", "left_steps": 0, "attempted_steps": steps},
         )
     st["move_left"] = left - steps
     return ToolResponse(
@@ -1236,7 +1246,7 @@ def consume_movement(name: str, distance_steps: float) -> ToolResponse:
 def set_cover(name: str, level: str):
     level = str(level)
     if level not in ("none", "half", "three_quarters", "total"):
-        return ToolResponse(content=[TextBlock(type="text", text=f"未知掩体等级 {level}")], metadata={"ok": False})
+        return ToolResponse(content=[TextBlock(type="text", text=f"未知掩体等级 {level}")], metadata={"ok": False, "error_type": "invalid_value", "param": "level", "value": level})
     WORLD.cover[str(name)] = level
     return ToolResponse(content=[TextBlock(type="text", text=f"掩体：{name} -> {level}")], metadata={"ok": True, "name": name, "cover": level})
 
@@ -1390,7 +1400,7 @@ def act_hide(name: str, dc: int = 13):
     nm = str(name)
     blocked, msg = _blocked_action(nm, "action")
     if blocked:
-        return ToolResponse(content=[TextBlock(type="text", text=msg)], metadata={"ok": False})
+        return ToolResponse(content=[TextBlock(type="text", text=msg)], metadata={"ok": False, "error_type": "attacker_unable"})
     res = skill_check_coc(nm, "Stealth")
     success = bool((res.metadata or {}).get("success"))
     out = list(res.content or [])
@@ -1543,7 +1553,7 @@ def recompute_coc_derived(name: str) -> ToolResponse:
     st = WORLD.characters.get(nm, {})
     coc = dict(st.get("coc") or {})
     if not coc:
-        return ToolResponse(content=[], metadata={"ok": False, "name": nm, "reason": "no_coc_block"})
+        return ToolResponse(content=[], metadata={"ok": False, "error_type": "no_coc_block", "name": nm})
     ch = {k.upper(): int(v) for k, v in (coc.get("characteristics") or {}).items()}
     con = int(ch.get("CON", 0))
     siz = int(ch.get("SIZ", 0))
@@ -1768,7 +1778,10 @@ def first_aid(name: str, target: str) -> ToolResponse:
     rescuer = str(name)
     blocked, msg = _blocked_action(rescuer, "action")
     if blocked:
-        return ToolResponse(content=[TextBlock(type="text", text=msg)], metadata={"ok": False, "rescuer": rescuer, "target": str(target)})
+        return ToolResponse(
+            content=[TextBlock(type="text", text=msg)],
+            metadata={"ok": False, "error_type": "attacker_unable", "rescuer": rescuer, "target": str(target)}
+        )
     tgt = str(target)
     st = WORLD.characters.setdefault(tgt, {"hp": 0, "max_hp": 0})
     logs: List[TextBlock] = []
@@ -1780,7 +1793,10 @@ def first_aid(name: str, target: str) -> ToolResponse:
                 logs.append(blk)
     ok = bool((chk.metadata or {}).get("success"))
     if not ok:
-        return ToolResponse(content=logs + [TextBlock(type="text", text=f"{rescuer} 急救失败，{tgt} 状态未变")], metadata={"ok": False, "rescuer": rescuer, "target": tgt})
+        return ToolResponse(
+            content=logs + [TextBlock(type="text", text=f"{rescuer} 急救失败，{tgt} 状态未变")],
+            metadata={"ok": False, "error_type": "check_failed", "rescuer": rescuer, "target": tgt}
+        )
 
     # Success path
     # If dying: stabilize and set hp to at least 1
@@ -2085,9 +2101,24 @@ def attack_with_weapon(
         # Range gate
         dfd = WORLD.characters.get(defender, {})
         distance_before = get_distance_steps_between(attacker, defender)
-        if distance_before is not None and distance_before > reach_steps:
-            msg = TextBlock(type="text", text=f"距离不足：{attacker} 使用 {weapon} 攻击 {defender} 失败（距离 {_fmt_distance(distance_before)}，触及 {_fmt_distance(reach_steps)}）")
-            return ToolResponse(content=pre_logs + [msg], metadata={"ok": False, "attacker": attacker, "defender": defender, "weapon_id": weapon, "hit": False, "reach_ok": False, "distance_before": distance_before, "distance_after": distance_before, "reach_steps": reach_steps, **({"guard": guard_meta} if guard_meta else {})})
+    if distance_before is not None and distance_before > reach_steps:
+        msg = TextBlock(type="text", text=f"距离不足：{attacker} 使用 {weapon} 攻击 {defender} 失败（距离 {_fmt_distance(distance_before)}，触及 {_fmt_distance(reach_steps)}）")
+        return ToolResponse(
+            content=pre_logs + [msg],
+            metadata={
+                "ok": False,
+                "error_type": "out_of_reach",
+                "attacker": attacker,
+                "defender": defender,
+                "weapon_id": weapon,
+                "hit": False,
+                "reach_ok": False,
+                "distance_before": distance_before,
+                "distance_after": distance_before,
+                "reach_steps": reach_steps,
+                **({"guard": guard_meta} if guard_meta else {}),
+            },
+        )
         # Attack resolution
         skill_name = str(w.get("skill")) if w.get("skill") else _weapon_skill_for(weapon, reach_steps, ability)
         parts: List[TextBlock] = list(pre_logs)
@@ -2209,6 +2240,7 @@ def attack_with_weapon(
             content=pre_logs + [msg],
             metadata={
                 "ok": False,
+                "error_type": "out_of_reach",
                 "attacker": attacker,
                 "defender": defender,
                 "weapon_id": weapon,
@@ -2590,7 +2622,7 @@ def cast_arts(attacker: str, art: str, target: Optional[str] = None, center: Opt
     # Range check
     dist = get_distance_steps_between(attacker, tgt)
     if dist is None or dist > rng:
-        return ToolResponse(content=[TextBlock(type="text", text=f"距离不足：{attacker}->{tgt} {dist if dist is not None else '?'}步/触及{rng}步")], metadata={"ok": False, "error_type": "range"})
+        return ToolResponse(content=[TextBlock(type="text", text=f"距离不足：{attacker}->{tgt} {dist if dist is not None else '?'}步/触及{rng}步")], metadata={"ok": False, "error_type": "out_of_reach"})
 
     # Line-of-sight check (simplified via cover)
     if "line-of-sight" in tags:
