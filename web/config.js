@@ -7,5 +7,4 @@
 //       point to the separately hosted backend, since Vercel does not run this
 //       project's Python/FastAPI + WebSocket server.
 window.RR = window.RR || {};
-"https://inspector-aye-graphs-spend.trycloudflare.com"; // e.g. "https://your-backend.example.com"
-
+window.RR.backendOrigin = "https://inspector-aye-graphs-spend.trycloudflare.com"; // e.g. "https://your-backend.example.com"
