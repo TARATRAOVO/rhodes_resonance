@@ -312,6 +312,65 @@ def reachable_targets_for_art(attacker: str, art: str) -> List[Tuple[str, int]]:
     out.sort(key=lambda t: (t[1], t[0]))
     return out
 
+
+# ---- World-level rule queries used by engine orchestration ----
+def is_dead(name: Optional[str]) -> bool:
+    """Return True if the character is dead (hp<=0 and not in dying)."""
+    if not name:
+        return False
+    try:
+        st = WORLD.characters.get(str(name), {})
+        hp = int(st.get("hp", 0) if st else 0)
+        dying = st.get("dying_turns_left") is not None
+        return (hp <= 0) and (not dying)
+    except Exception:
+        return False
+
+
+def hostiles_present(participants: Optional[List[str]] = None, threshold: int = -10) -> bool:
+    """Return True if there exists a hostile pair (relation<=threshold) among living actors.
+
+    - Candidate set priority: participants if provided; else those with positions; else all characters.
+    - Living: hp > 0（濒死也视为不“存活”以匹配原主循环用于战斗继续性的语义）。
+    - Relations source: WORLD.relations (tuple keys (a,b)).
+    """
+    # Resolve field names
+    if participants:
+        names = [str(n) for n in participants]
+    else:
+        pos_keys = list((WORLD.positions or {}).keys())
+        if pos_keys:
+            names = [str(n) for n in pos_keys]
+        else:
+            names = [str(n) for n in (WORLD.characters or {}).keys()]
+    # Filter living (hp>0)
+    live = []
+    for nm in names:
+        try:
+            st = WORLD.characters.get(str(nm), {})
+            if int(st.get("hp", 1)) > 0:
+                live.append(str(nm))
+        except Exception:
+            live.append(str(nm))
+    if len(live) <= 1:
+        return False
+    # Build relation lookup
+    rel = dict(WORLD.relations or {})
+    thr = int(threshold)
+    for i, a in enumerate(live):
+        for b in live[i + 1 :]:
+            try:
+                sc_ab = int(rel.get((a, b), 0))
+            except Exception:
+                sc_ab = 0
+            try:
+                sc_ba = int(rel.get((b, a), 0))
+            except Exception:
+                sc_ba = 0
+            if sc_ab <= thr or sc_ba <= thr:
+                return True
+    return False
+
 def reset_world() -> None:
     """Reset the global WORLD to a fresh, empty instance.
 

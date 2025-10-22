@@ -1013,6 +1013,10 @@ class _WorldPort:
     list_adjacent_units = staticmethod(world_impl.list_adjacent_units)
     reachable_targets_for_weapon = staticmethod(world_impl.reachable_targets_for_weapon)
     reachable_targets_for_art = staticmethod(world_impl.reachable_targets_for_art)
+    get_distance_steps_between = staticmethod(world_impl.get_distance_steps_between)
+    # engine-facing rule queries
+    is_dead = staticmethod(world_impl.is_dead)
+    hostiles_present = staticmethod(world_impl.hostiles_present)
     # participants and character meta helpers
     set_participants = staticmethod(world_impl.set_participants)
     set_character_meta = staticmethod(world_impl.set_character_meta)
@@ -2488,45 +2492,6 @@ async def run_demo(
         # Default to original semantics: end when no hostiles (fixed behaviour)
         require_hostiles = True
 
-        def _is_alive(nm: str) -> bool:
-            try:
-                chars = world.snapshot().get("characters", {}) or {}
-                st = chars.get(str(nm), {})
-                return int(st.get("hp", 1)) > 0
-            except Exception:
-                return True
-
-        def _living_field_names() -> List[str]:
-            # Prefer participants; else those with positions; else all characters
-            base: List[str]
-            if allowed_names_world:
-                base = list(allowed_names_world)
-            else:
-                snap = world.snapshot()
-                base = list((snap.get("positions") or {}).keys()) or list(
-                    (snap.get("characters") or {}).keys()
-                )
-            return [n for n in base if _is_alive(n)]
-
-        def _hostiles_present(threshold: int = -10) -> bool:
-            names = _living_field_names()
-            if len(names) <= 1:
-                return False
-            snap_rel = world.snapshot().get("relations") or {}
-            for i, a in enumerate(names):
-                for b in names[i + 1 :]:
-                    try:
-                        sc_ab = int(snap_rel.get(f"{str(a)}->{str(b)}", 0))
-                    except Exception:
-                        sc_ab = 0
-                    try:
-                        sc_ba = int(snap_rel.get(f"{str(b)}->{str(a)}", 0))
-                    except Exception:
-                        sc_ba = 0
-                    if sc_ab <= threshold or sc_ba <= threshold:
-                        return True
-            return False
-
         while True:
             try:
                 rt = world.runtime()
@@ -2557,7 +2522,7 @@ async def run_demo(
             # 移除回合开始时的世界概要广播；仅在每个 NPC 行动前发送概要（见 context:world）
 
             # If无敌对，则退出战斗模式但不强制结束整体流程（除非显式要求）
-            if not _hostiles_present():
+            if not world.hostiles_present(allowed_names_world or None, RELATION_HOSTILE):
                 try:
                     if bool(world.runtime().get("in_combat")):
                         world.end_combat()
@@ -2571,15 +2536,9 @@ async def run_demo(
             # 按参与者名称轮转；玩家与 NPC 均在其中
             for name in list(allowed_names_world) or []:
                 name = str(name)
-                # Skip turn only if the character is truly dead (hp<=0 and not in dying state)
+                # Skip turn only if the character is truly dead (world-level check)
                 try:
-                    sheet = (world.snapshot().get("characters") or {}).get(
-                        name, {}
-                    ) or {}
-                    hpv = int(sheet.get("hp", 1))
-                    dt = sheet.get("dying_turns_left", None)
-                    is_dead = (hpv <= 0) and (dt is None)
-                    if is_dead:
+                    if bool(world.is_dead(name)):
                         _emit(
                             "turn_start",
                             actor=name,
@@ -2751,7 +2710,6 @@ async def run_demo(
                     # 距离提示（仅当前行动者私有）：列出与场上所有单位的曼哈顿距离（步）
                     try:
                         positions = dict((snap_now.get("positions") or {}))
-                        my_pos = positions.get(name)
                         # 候选单位：优先 participants；否则使用所有已登记坐标的单位
                         try:
                             participants_now = list(
@@ -2765,34 +2723,28 @@ async def run_demo(
                         # 排除自己
                         candidates = [n for n in candidates if str(n) != str(name)]
                         lines_priv.append(PRIV_DIST_TITLE)
-                        # 如果自身坐标缺失，给出说明
-                        if not (isinstance(my_pos, (list, tuple)) and len(my_pos) >= 2):
-                            lines_priv.append(PRIV_DIST_CANNOT_COMPUTE)
-                        else:
-                            mx, my = int(my_pos[0]), int(my_pos[1])
-                            known: List[tuple[int, str]] = []
-                            unknown: List[str] = []
-                            for other in candidates:
-                                pos = positions.get(other)
-                                if isinstance(pos, (list, tuple)) and len(pos) >= 2:
-                                    try:
-                                        ox, oy = int(pos[0]), int(pos[1])
-                                        dist = abs(mx - ox) + abs(my - oy)
-                                        known.append((int(dist), str(other)))
-                                    except Exception:
-                                        unknown.append(str(other))
-                                else:
-                                    unknown.append(str(other))
-                            # 距离升序，名称次序作为平手兜底
-                            known.sort(key=lambda t: (t[0], t[1]))
-                            for dist, who in known:
-                                lines_priv.append(
-                                    PRIV_DIST_LINE.format(who=who, dist=int(dist))
-                                )
-                            for who in unknown:
-                                lines_priv.append(
-                                    PRIV_DIST_UNKNOWN_LINE.format(who=who)
-                                )
+                        # 使用 world 的距离函数；未记录返回“未知”
+                        known: List[tuple[int, str]] = []
+                        unknown: List[str] = []
+                        for other in candidates:
+                            try:
+                                d = world.get_distance_steps_between(name, other)
+                            except Exception:
+                                d = None
+                            if d is None:
+                                unknown.append(str(other))
+                            else:
+                                known.append((int(d), str(other)))
+                        # 距离升序，名称次序作为平手兜底
+                        known.sort(key=lambda t: (t[0], t[1]))
+                        for dist, who in known:
+                            lines_priv.append(
+                                PRIV_DIST_LINE.format(who=who, dist=int(dist))
+                            )
+                        for who in unknown:
+                            lines_priv.append(
+                                PRIV_DIST_UNKNOWN_LINE.format(who=who)
+                            )
                     except Exception:
                         # 容错：距离提示失败时跳过，不影响回合
                         pass
@@ -2863,7 +2815,7 @@ async def run_demo(
                     pass
 
                 # After each action, if无敌对则退出战斗但继续对话流程
-                if not _hostiles_present():
+                if not world.hostiles_present(allowed_names_world or None, RELATION_HOSTILE):
                     try:
                         if bool(world.runtime().get("in_combat")):
                             world.end_combat()
