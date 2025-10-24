@@ -1972,61 +1972,15 @@ async def run_demo(
     # Tool list must be provided by caller (main). Keep empty default.
     tool_list = list(tool_fns) if tool_fns is not None else []
 
-    # Ensure character persona/appearance/quotes are present (idempotent)
-    try:
-        for nm, entry in actor_entries.items():
-            try:
-                world.set_character_meta(
-                    nm,
-                    persona=entry.get("persona"),
-                    appearance=entry.get("appearance"),
-                    quotes=entry.get("quotes"),
-                )
-            except Exception:
-                pass
-    except Exception:
-        pass
+    # Do not modify character meta from main; rely on world selection to populate persona/appearance/quotes
 
     # Build agents for NPCs only; players由命令行输入驱动
     if allowed_names_world:
         for name in allowed_names_world:
             entry = (actor_entries.get(name) or {})
-            # Stat block: CoC only (DnD compatibility removed).
-            try:
-                coc_block = entry.get("coc")
-                if isinstance(coc_block, dict):
-                    world.set_coc_character_from_config(name=name, coc=coc_block or {})
-                else:
-                    # Create a minimal CoC sheet with mid-line defaults
-                    world.set_coc_character(
-                        name=name,
-                        characteristics={
-                            "STR": 50,
-                            "DEX": 50,
-                            "CON": 50,
-                            "INT": 50,
-                            "POW": 50,
-                            "APP": 50,
-                            "EDU": 60,
-                            "SIZ": 50,
-                            "LUCK": 50,
-                        },
-                    )
-            except Exception:
-                pass
+            # Do not patch CoC stats from main; rely on world selection to populate sheets
             # Positions already applied by world selection
-            # Load inventory (weapons as items) from character config
-            try:
-                inv = entry.get("inventory") or {}
-                if isinstance(inv, dict):
-                    for it, cnt in inv.items():
-                        try:
-                            # Use world port instead of direct module to keep the engine decoupled
-                            world.grant_item(target=name, item=str(it), n=int(cnt))
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+            # Do not duplicate inventory grants in main; world selection already ingests inventory
 
             # Build per-actor weapon brief for prompt
             def _weapon_brief_for(nm: str) -> str:
@@ -2092,27 +2046,7 @@ async def run_demo(
         for name, entry in actor_entries.items():
             if name in allowed_names_world:
                 continue
-            try:
-                coc_block = entry.get("coc")
-                if isinstance(coc_block, dict):
-                    world.set_coc_character_from_config(name=name, coc=coc_block or {})
-                else:
-                    world.set_coc_character(
-                        name=name,
-                        characteristics={
-                            "STR": 50,
-                            "DEX": 50,
-                            "CON": 50,
-                            "INT": 50,
-                            "POW": 50,
-                            "APP": 50,
-                            "EDU": 60,
-                            "SIZ": 50,
-                            "LUCK": 50,
-                        },
-                    )
-            except Exception:
-                pass
+            # Do not preload CoC stats for non-participants in main
             # Positions already applied by world selection
     # No fallback to default protagonists; if story provides no positions, run without participants.
 
@@ -2213,27 +2147,16 @@ async def run_demo(
         + (" | 初始坐标：" + "; ".join(_start_pos_lines) if _start_pos_lines else "")
     )
 
-    # Ensure world has at least one opening detail; world init may have ingested details already
-    default_opening = "旧城区·北侧仓棚。铁梁回声震耳，每名战斗者都盯紧了自己的对手——退路已绝，只能分出胜负！"
+    # Opening line is taken from scene details when present; main does not modify world if empty
     try:
         snap0 = world.snapshot()
-        current_loc = str((snap0 or {}).get("location") or "")
         details0 = list((snap0 or {}).get("scene_details") or [])
-        opening_line = details0[0] if details0 else default_opening
-        if not details0:
-            details_new = [opening_line]
-            world.set_scene(current_loc, None, append=True, details=details_new)
-    except Exception as exc:
-        _emit(
-            "error",
-            phase="scene",
-            data={
-                "message": "写入场景细节失败",
-                "error_type": "scene_details_append",
-                "exception": str(exc),
-            },
-        )
-    announcement_text = opening_line + "\n" + _participants_header
+        opening_line = details0[0] if details0 else ""
+    except Exception:
+        opening_line = ""
+    announcement_text = (
+        (opening_line + "\n") if opening_line else ""
+    ) + _participants_header
 
     # 若无参与者（按 positions 推断）则在进入 Hub 前直接记录并结束
     if not allowed_names_world:

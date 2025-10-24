@@ -2406,24 +2406,24 @@ def attack_with_weapon(
         # Range gate
         dfd = WORLD.characters.get(defender, {})
         distance_before = get_distance_steps_between(attacker, defender)
-    if distance_before is not None and distance_before > reach_steps:
-        msg = TextBlock(type="text", text=f"距离不足：{attacker} 使用 {weapon} 攻击 {defender} 失败（距离 {_fmt_distance(distance_before)}，触及 {_fmt_distance(reach_steps)}）")
-        return ToolResponse(
-            content=pre_logs + [msg],
-            metadata={
-                "ok": False,
-                "error_type": "out_of_reach",
-                "attacker": attacker,
-                "defender": defender,
-                "weapon_id": weapon,
-                "hit": False,
-                "reach_ok": False,
-                "distance_before": distance_before,
-                "distance_after": distance_before,
-                "reach_steps": reach_steps,
-                **({"guard": guard_meta} if guard_meta else {}),
-            },
-        )
+        if distance_before is not None and distance_before > reach_steps:
+            msg = TextBlock(type="text", text=f"距离不足：{attacker} 使用 {weapon} 攻击 {defender} 失败（距离 {_fmt_distance(distance_before)}，触及 {_fmt_distance(reach_steps)}）")
+            return ToolResponse(
+                content=pre_logs + [msg],
+                metadata={
+                    "ok": False,
+                    "error_type": "out_of_reach",
+                    "attacker": attacker,
+                    "defender": defender,
+                    "weapon_id": weapon,
+                    "hit": False,
+                    "reach_ok": False,
+                    "distance_before": distance_before,
+                    "distance_after": distance_before,
+                    "reach_steps": reach_steps,
+                    **({"guard": guard_meta} if guard_meta else {}),
+                },
+            )
         # Attack resolution
         skill_name = str(w.get("skill")) if w.get("skill") else _weapon_skill_for(weapon, reach_steps, ability)
         parts: List[TextBlock] = list(pre_logs)

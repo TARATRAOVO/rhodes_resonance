@@ -23,9 +23,40 @@
 现在：地点 旧城区·北侧仓棚；时间 08:00；天气 overcast
 环境细节：仓棚顶板破损，几缕晨光穿透尘埃；木箱凌乱堆叠，角落潮湿有拖拽痕迹；远处传来金属碰撞与杂音；旧城区·北侧仓棚。铁梁回声震耳。
 目标：冲突终结(pending)
-坐标：Amiya(1, 1); Doctor(0, 0); Faust(12, 2); Mephisto(7, -1)
-角色：Doctor(HP 11/11); Amiya(HP 10/10); Mephisto(HP 11/11); Faust(HP 12/12)
+坐标：Amiya(5, 1); Doctor(5, 1); Faust(12, 2); Mephisto(7, -1)
+角色：Doctor(HP 11/11); Amiya(HP 0/10)（濒死3）; Mephisto(HP 11/11); Faust(HP 12/12)
+
+--- [recap] ---
+回顾
+刚才...：
+- Doctor: 心跳在耳膜里敲出倒计时，只剩一个念头：抢在下一箭前站到她身前。
+- Doctor[tool]: Doctor 向 (5, 1) 移动 6步，现位于 (5, 1)。 已抵达目标。
+- Faust: ……目标确认。
+- Faust: 浮士德单膝跪上木箱，折叠弩炮在掌中咔哒展开，暗蓝短发下的绿瞳冷冽锁定八步外的身影。
+- Faust: 铁梁回声里，他无声地深吸，指尖压上扳机——
+- Faust[tool]: 对抗：Faust(Firearms_Rifle_Crossbow)[fail] vs Amiya(Dodge)[fail] -> Faust 胜
+伤害：1d8 -> 7
+Amiya 受到 7 伤害，HP 0/10（倒地）
+Amiya 进入濒死（3回合后死亡；再次受伤即死）
 
 --- [reach_preview] ---
 作战规则：只能对reach_preview的“可及目标”使用 perform_attack。
-可及术式（mephisto_resonance，触及 8步）可用目标：Amiya(8步), Doctor(8步), Faust(8步)
+可及武器（mephisto_cane，触及 4步）可用目标：Amiya(4步), Doctor(4步)
+可及术式（mephisto_resonance，触及 8步）可用目标：Amiya(4步), Doctor(4步), Faust(8步)
+可及术式（mephisto_lullaby，触及 6步）可用目标：Amiya(4步), Doctor(4步)
+可及术式（mephisto_pain，触及 6步）可用目标：Amiya(4步), Doctor(4步)
+
+--- [private] ---
+优先处理对白（仅你可见）：
+- 说话者：Doctor
+- 内容：心跳在耳膜里敲出倒计时，只剩一个念头：抢在下一箭前站到她身前。
+- 你对该角色的关系：-85（死敌）
+回合资源（仅你可见）：
+- 移动：5/5 步
+- 动作：可用；附赠动作：可用；反应：可用
+作战规则：只能对reach_preview的“可及目标”使用 perform_attack。
+有效行动要求：存在敌对关系时，每回合必须进行一次有效行动；对超出触及范围的 perform_attack 视为无效。
+距离提示（仅你可见）：
+- Amiya：4步
+- Doctor：4步
+- Faust：8步
