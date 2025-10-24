@@ -196,36 +196,25 @@ PRIV_STATUS_LORE_DEFAULT = "- {state}：效果生效中（{duration}）"
 
 
 def project_root() -> Path:
-    """Return repository root (folder that contains configs/ and src/).
-
-    Walk upwards from this file to find a directory that contains a
-    `configs/` folder. Fallback to two levels up from this file.
-    """
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / "configs").exists():
-            return parent
+    """Delegate project root resolution to world component for single source of truth."""
     try:
-        return (
-            here.parents[1]
-            if (here.parents[1] / "configs").exists()
-            else here.parents[2]
-        )
+        return world_impl.project_root()
     except Exception:
-        return here.parents[1]
+        # Fallback to local heuristic if world component is unavailable
+        here = Path(__file__).resolve()
+        for parent in here.parents:
+            if (parent / "configs").exists():
+                return parent
+        try:
+            return (
+                here.parents[1]
+                if (here.parents[1] / "configs").exists()
+                else here.parents[2]
+            )
+        except Exception:
+            return here.parents[1]
 
-
-def _configs_dir() -> Path:
-    return project_root() / "configs"
-
-
-def _load_json(path: Path) -> dict:
-    # no fallback: read and propagate errors if any
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"expected object at {path}, got {type(data).__name__}")
-    return data
+    # no additional config helpers; world handles story/characters/weapons/arts
 
 
 @dataclass
@@ -242,63 +231,7 @@ class ModelConfig:
 
 
 def load_model_config() -> ModelConfig:
-    return ModelConfig.from_dict(_load_json(_configs_dir() / "model.json"))
-
-
-def load_story_config(selected_id: Optional[str] = None) -> dict:
-    """Load story configuration.
-
-    Supports two shapes:
-      1) Single-story (legacy): the file is the story object itself.
-      2) Multi-story container: {"active_id": "id", "stories": {"id": {..}, ...}}
-
-    At runtime we always return a single-story object (the active one) so
-    the rest of the engine remains unchanged.
-    """
-    data = _load_json(_configs_dir() / "story.json")
-    if not data:
-        # no fallback: require explicit story config
-        raise FileNotFoundError(
-            "configs/story.json is missing or empty; fallback removed"
-        )
-
-    try:
-        # container shape (ignore any legacy active_id; prefer explicit selection)
-        if isinstance(data, dict) and isinstance(data.get("stories"), dict):
-            stories = data.get("stories") or {}
-            sid = ""
-            sel = str(selected_id).strip() if selected_id is not None else ""
-            if sel and sel in stories:
-                sid = sel
-            else:
-                # stable default: first by sorted order
-                sid = sorted(stories.keys())[0] if stories else ""
-            story = stories.get(sid) if sid else None
-            if isinstance(story, dict):
-                return story
-            # container present but empty/malformed -> fallthrough to legacy
-    except Exception:
-        pass
-    # legacy single-story
-    return data
-
-
-def load_characters() -> dict:
-    return _load_json(_configs_dir() / "characters.json")
-
-
-def load_weapons() -> dict:
-    return _load_json(_configs_dir() / "weapons.json")
-
-
-def load_arts() -> dict:
-    path = _configs_dir() / "arts.json"
-    if not path.exists():
-        return {}
-    data = _load_json(path)
-    if not isinstance(data, dict):
-        return {}
-    return data
+    return ModelConfig.from_dict(json.load((project_root() / "configs" / "model.json").open("r", encoding="utf-8")))
 
 
 # ============================================================
@@ -1981,72 +1914,35 @@ async def run_demo(
     tool_dispatch: Dict[str, object] | None,
     # prompts removed: prompt assembly moved to main; templates now come from defaults
     model_cfg: Mapping[str, Any],
-    story_cfg: Mapping[str, Any],
-    characters: Mapping[str, Any],
     world: Any,
     player_input_provider: Optional[Callable[[str], Awaitable[str]]] = None,
     pause_gate: Optional[object] = None,
 ) -> None:
     """Run the NPC talk demo (sequential group chat, no GM/adjudication)."""
 
-    story_positions: Dict[str, Tuple[int, int]] = {}
-
-    if isinstance(story_cfg, dict):
-        _parse_story_positions(
-            story_cfg.get("initial_positions") or {}, story_positions
-        )
-        _parse_story_positions(story_cfg.get("positions") or {}, story_positions)
-        initial_section = story_cfg.get("initial")
-        if isinstance(initial_section, dict):
-            _parse_story_positions(
-                initial_section.get("positions") or {}, story_positions
-            )
-
-    # story position application moved to top-level helper
-
-    # system prompt assembly uses global build_sys_prompt
-
-    # Build actors from configs
-    char_cfg = dict(characters or {})
-    npcs_list: List[ReActAgent] = []  # legacy name; no longer used for turn order
-    participants_order: List[AgentBase] = []
-    actor_entries: Dict[str, dict] = {}
+    # System prompt assembly uses policy and world snapshot
+    # Build actors from WORLD snapshot
+    snap0 = world.snapshot()
+    char_map = dict(snap0.get("characters") or {})
+    actor_entries: Dict[str, dict] = {
+        str(k): (v if isinstance(v, dict) else {}) for k, v in char_map.items()
+    }
+    # Map actor name -> type (npc/player); default npc
+    actor_types: Dict[str, str] = {
+        nm: str((entry or {}).get("type", "npc")).lower()
+        for nm, entry in actor_entries.items()
+    }
+    # Participants list from world; fallback to position keys if empty
     try:
-        actor_entries = {
-            str(k): v
-            for k, v in char_cfg.items()
-            if isinstance(v, dict)
-            and str(k) not in {"relations", "objective_positions", "participants"}
-        }
+        allowed_names_world: List[str] = list(snap0.get("participants") or [])
+        if not allowed_names_world:
+            allowed_names_world = list((snap0.get("positions") or {}).keys())
     except Exception:
-        actor_entries = {}
-    # Map actor name -> type ("npc" or "player"); default to npc
-    actor_types: Dict[str, str] = {}
-    try:
-        actor_types = {
-            str(nm): str((entry or {}).get("type", "npc")).lower()
-            for nm, entry in actor_entries.items()
-        }
-    except Exception:
-        actor_types = {}
-    # Participants resolution per request: derive purely from story positions that were ingested
-    # into `story_positions` (supports top-level initial_positions/positions 或 initial.positions)。
-    # If none present, run without participants (no implicit fallback to any default pair).
-    allowed_names: List[str] = list(story_positions.keys())
-    # Persist participants to world so all downstream consumers read from world only
-    try:
-        world.set_participants(allowed_names)
-    except Exception:
-        pass
-    try:
-        allowed_names_world: List[str] = list(
-            world.snapshot().get("participants") or []
-        )
-    except Exception:
-        allowed_names_world = list(allowed_names)
+        allowed_names_world = []
     allowed_names_str = ", ".join(allowed_names_world) if allowed_names_world else ""
-
-    rel_cfg_raw = char_cfg.get("relations") if isinstance(char_cfg, dict) else {}
+    # Agent lists for hub: keep order of NPC participants only
+    npcs_list: List[ReActAgent] = []
+    participants_order: List[AgentBase] = []
 
     def _relation_brief(name: str) -> str:
         """Build relation brief from world state, not raw config."""
@@ -2076,11 +1972,9 @@ async def run_demo(
     # Tool list must be provided by caller (main). Keep empty default.
     tool_list = list(tool_fns) if tool_fns is not None else []
 
-    # Ensure character persona/appearance/quotes are stored in world for all actors
+    # Ensure character persona/appearance/quotes are present (idempotent)
     try:
         for nm, entry in actor_entries.items():
-            if not isinstance(entry, dict):
-                continue
             try:
                 world.set_character_meta(
                     nm,
@@ -2096,7 +1990,7 @@ async def run_demo(
     # Build agents for NPCs only; players由命令行输入驱动
     if allowed_names_world:
         for name in allowed_names_world:
-            entry = (char_cfg.get(name) or {}) if isinstance(char_cfg, dict) else {}
+            entry = (actor_entries.get(name) or {})
             # Stat block: CoC only (DnD compatibility removed).
             try:
                 coc_block = entry.get("coc")
@@ -2120,7 +2014,7 @@ async def run_demo(
                     )
             except Exception:
                 pass
-            apply_story_position(world, story_positions, name)
+            # Positions already applied by world selection
             # Load inventory (weapons as items) from character config
             try:
                 inv = entry.get("inventory") or {}
@@ -2219,55 +2113,10 @@ async def run_demo(
                     )
             except Exception:
                 pass
-            apply_story_position(world, story_positions, name)
+            # Positions already applied by world selection
     # No fallback to default protagonists; if story provides no positions, run without participants.
 
-    for nm in story_positions:
-        try:
-            if nm in (world.runtime().get("positions") or {}):
-                continue
-        except Exception:
-            pass
-        apply_story_position(world, story_positions, nm)
-
-    # Initialize relations from config
-    rel_cfg = rel_cfg_raw or {}
-    if isinstance(rel_cfg, dict):
-        for src, mapping in rel_cfg.items():
-            if not isinstance(mapping, dict):
-                continue
-            for dst, val in mapping.items():
-                try:
-                    score = max(-100, min(100, int(val)))
-                except Exception:
-                    continue
-                try:
-                    world.set_relation(str(src), str(dst), score, reason="配置设定")
-                except Exception:
-                    pass
-
-    # Scene setup from story config (moved to top-level helpers)
-    scene_cfg = story_cfg.get("scene") if isinstance(story_cfg, dict) else {}
-    scene_name, scene_objectives, scene_details, scene_weather, scene_time_min = (
-        normalize_scene_cfg(scene_cfg)
-    )
-    if any(
-        [
-            scene_name,
-            scene_objectives,
-            scene_details,
-            scene_weather,
-            scene_time_min is not None,
-        ]
-    ):
-        apply_scene_to_world(
-            world,
-            scene_name,
-            scene_objectives,
-            scene_details,
-            scene_weather,
-            scene_time_min,
-        )
+    # Relations/scene/positions already applied by world selection
 
     current_round = 0
 
@@ -2341,23 +2190,7 @@ async def run_demo(
     # --- Ephemeral NPC helper to remove duplication ---
     # Ephemeral agent, reach preview, and NPC turn helpers moved to top-level helpers
 
-    # Fallback: 若上游未载入术式表，这里尝试一次惰性载入，避免术式提示/施放为“未知术式”
-    try:
-        if hasattr(world, "get_arts_defs") and callable(
-            getattr(world, "get_arts_defs")
-        ):
-            arts_defs_now = world.get_arts_defs() or {}
-            if not arts_defs_now and hasattr(world, "set_arts_defs"):
-                try:
-                    arts = load_arts() or {}
-                except Exception:
-                    arts = {}
-                try:
-                    world.set_arts_defs(arts)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    # 术式表由世界选择流程负责载入；此处不再做兜底加载
 
     # Human-readable header for participants and starting positions
     _start_pos_lines = []
@@ -2365,7 +2198,7 @@ async def run_demo(
         parts = list(world.snapshot().get("participants") or [])
         pos_map = world.snapshot().get("positions") or {}
         for nm in parts:
-            pos = pos_map.get(nm) or story_positions.get(nm)
+            pos = pos_map.get(nm)
             if pos:
                 _start_pos_lines.append(f"{nm}({pos[0]}, {pos[1]})")
     except Exception:
@@ -2380,26 +2213,15 @@ async def run_demo(
         + (" | 初始坐标：" + "; ".join(_start_pos_lines) if _start_pos_lines else "")
     )
 
-    # Opening text: read from configs, persist into world.scene_details (append) for single-source-of-truth
-    opening_text: Optional[str] = None
-    try:
-        if isinstance(story_cfg, dict):
-            sc = story_cfg.get("scene")
-            if isinstance(sc, dict):
-                txt = sc.get("description") or sc.get("opening") or ""
-                if isinstance(txt, str) and txt.strip():
-                    opening_text = txt.strip()
-    except Exception:
-        opening_text = None
+    # Ensure world has at least one opening detail; world init may have ingested details already
     default_opening = "旧城区·北侧仓棚。铁梁回声震耳，每名战斗者都盯紧了自己的对手——退路已绝，只能分出胜负！"
-    opening_line = opening_text or default_opening
-    # Append opening into world.scene_details if not already present
     try:
         snap0 = world.snapshot()
         current_loc = str((snap0 or {}).get("location") or "")
         details0 = list((snap0 or {}).get("scene_details") or [])
-        if opening_line and opening_line not in details0:
-            details_new = details0 + [opening_line]
+        opening_line = details0[0] if details0 else default_opening
+        if not details0:
+            details_new = [opening_line]
             world.set_scene(current_loc, None, append=True, details=details_new)
     except Exception as exc:
         _emit(
@@ -2950,11 +2772,11 @@ def _world_summary_text(snap: dict) -> str:
 def _bootstrap_runtime(
     *, for_server: bool = False, selected_story_id: Optional[str] = None
 ):
-    # Load configs and create logging context, optionally reset world for server session
+    """Create logging context and world port; model config stays here; world selection elsewhere.
+
+    main/server code should call `world_impl.select_world(id)` when a specific world is desired.
+    """
     model_cfg_obj = load_model_config()
-    story_cfg = load_story_config(selected_story_id)
-    characters = load_characters()
-    weapons = load_weapons() or {}
     if is_dataclass(model_cfg_obj):
         model_cfg: Dict[str, Any] = asdict(model_cfg_obj)
     else:
@@ -2967,7 +2789,7 @@ def _bootstrap_runtime(
         except Exception:
             pass
     world = _WorldPort()
-    return model_cfg, story_cfg, characters, weapons, world, log_ctx, root
+    return model_cfg, world, log_ctx, root
 
 
 def main() -> None:
@@ -2976,9 +2798,20 @@ def main() -> None:
     print("============================================================")
 
     # Bootstrap shared runtime bits
-    model_cfg, story_cfg, characters, weapons, world, log_ctx, root = (
+    model_cfg, world, log_ctx, root = (
         _bootstrap_runtime(for_server=False)
     )
+    # Select default world (first available) for CLI run
+    try:
+        sid = None
+        try:
+            ids = world_impl.list_world_ids()
+            sid = ids[0] if ids else None
+        except Exception:
+            sid = None
+        world_impl.select_world(sid)
+    except Exception:
+        pass
 
     # Clean prompt dumps at run start; keep only latest per actor during run
     try:
@@ -3003,49 +2836,7 @@ def main() -> None:
         )
         log_ctx.bus.publish(ev)
 
-    # Load weapon table into world before tools are used
-    try:
-        world.set_weapon_defs(weapons)
-    except Exception as exc:
-        # 记录武器表载入失败，继续运行（允许无武器配置）
-        emit(
-            event_type="error",
-            phase="init",
-            data={
-                "message": "加载武器表失败",
-                "error_type": "weapon_defs_load",
-                "exception": str(exc),
-            },
-        )
-    # Load arts table (optional)
-    try:
-        arts = load_arts() or {}
-        if hasattr(world, "set_arts_defs"):
-            world.set_arts_defs(arts)
-        # Structured telemetry: record how many arts were loaded and their ids
-        try:
-            emit(
-                event_type="system",
-                phase="init",
-                data={
-                    "message": "术式表载入完成",
-                    "arts_defs_count": len(arts or {}),
-                    "arts_defs_keys": sorted(list((arts or {}).keys())),
-                },
-            )
-        except Exception:
-            # logging should never block startup
-            pass
-    except Exception as exc:
-        emit(
-            event_type="error",
-            phase="init",
-            data={
-                "message": "加载术式表失败",
-                "error_type": "arts_defs_load",
-                "exception": str(exc),
-            },
-        )
+    # World already initialised by select_world; no manual table loading here
     # Inject the port (adapter) so actions depend on a stable surface
     tool_list, tool_dispatch = make_npc_actions(world=world)
 
@@ -3060,10 +2851,7 @@ def main() -> None:
                 build_agent=build_agent,
                 tool_fns=tool_list,
                 tool_dispatch=tool_dispatch,
-                # prompts removed
                 model_cfg=model_cfg,
-                story_cfg=story_cfg,
-                characters=characters,
                 world=world,
             )
         )
@@ -3330,61 +3118,13 @@ async def _start_game_server_mode(
         except Exception:
             pass
 
-    model_cfg, story_cfg, characters, weapons, world, log_ctx, root = (
+    model_cfg, world, log_ctx, root = (
         _bootstrap_runtime(
             for_server=True,
             selected_story_id=_STATE.selected_story_id or None,
         )
     )
     _STATE.log_ctx = log_ctx
-    try:
-        world.set_weapon_defs(weapons)
-    except Exception as exc:
-        # record error to structured logs but do not fail start
-        try:
-            ev = Event(
-                event_type=EventType.ERROR,
-                data={
-                    "message": "加载武器表失败",
-                    "error_type": "weapon_defs_load",
-                    "exception": str(exc),
-                },
-            )
-            log_ctx.bus.publish(ev)
-        except Exception:
-            pass
-
-    # Load arts table (optional, server mode)
-    try:
-        arts = load_arts() or {}
-        if hasattr(world, "set_arts_defs"):
-            world.set_arts_defs(arts)
-        # Structured telemetry (server mode): record arts load result
-        try:
-            ev = Event(
-                event_type=EventType.SYSTEM,
-                data={
-                    "message": "术式表载入完成",
-                    "arts_defs_count": len(arts or {}),
-                    "arts_defs_keys": sorted(list((arts or {}).keys())),
-                },
-            )
-            log_ctx.bus.publish(ev)
-        except Exception:
-            pass
-    except Exception as exc:
-        try:
-            ev = Event(
-                event_type=EventType.ERROR,
-                data={
-                    "message": "加载术式表失败",
-                    "error_type": "arts_defs_load",
-                    "exception": str(exc),
-                },
-            )
-            log_ctx.bus.publish(ev)
-        except Exception:
-            pass
 
     tool_list, tool_dispatch = make_npc_actions(world=world)
 
@@ -3431,50 +3171,15 @@ async def _start_game_server_mode(
             _STATE.running = True
             # reset event buffer for new session
             await _STATE.bridge.clear()
-            # Pre-populate world & snapshot from story config so hello has positions
+            # Select world for this session and publish initial snapshot
             try:
-                story_positions: Dict[str, Tuple[int, int]] = {}
-
-                def _ingest_positions(raw: Any) -> None:
-                    if not isinstance(raw, dict):
-                        return
-                    for actor_name, pos in raw.items():
-                        if isinstance(pos, (list, tuple)) and len(pos) >= 2:
-                            try:
-                                story_positions[str(actor_name)] = (
-                                    int(pos[0]),
-                                    int(pos[1]),
-                                )
-                            except Exception:
-                                continue
-
-                if isinstance(story_cfg, dict):
-                    _ingest_positions(story_cfg.get("initial_positions") or {})
-                    _ingest_positions(story_cfg.get("positions") or {})
-                    initial_section = story_cfg.get("initial")
-                    if isinstance(initial_section, dict):
-                        _ingest_positions(initial_section.get("positions") or {})
-                # apply into world before first snapshot
-                for nm, (x, y) in story_positions.items():
-                    try:
-                        world.set_position(nm, x, y)
-                    except Exception:
-                        pass
-                if story_positions:
-                    try:
-                        world.set_participants(list(story_positions.keys()))
-                    except Exception:
-                        pass
-                # snapshot after pre-population
-                try:
-                    _STATE.last_snapshot = world.snapshot()
-                except Exception:
-                    _STATE.last_snapshot = {}
+                world_impl.select_world(_STATE.selected_story_id or None)
             except Exception:
-                try:
-                    _STATE.last_snapshot = world.snapshot()
-                except Exception:
-                    _STATE.last_snapshot = {}
+                pass
+            try:
+                _STATE.last_snapshot = world.snapshot()
+            except Exception:
+                _STATE.last_snapshot = {}
             # Clean prompt dumps at session start; keep only latest per actor during run
             try:
                 prompts_dir = root / "logs" / "prompts"
@@ -3509,8 +3214,6 @@ async def _start_game_server_mode(
                 tool_fns=tool_list,
                 tool_dispatch=tool_dispatch,
                 model_cfg=model_cfg,
-                story_cfg=story_cfg,
-                characters=characters,
                 world=world,
                 player_input_provider=lambda actor_name: _STATE.get_player_queue(
                     str(actor_name)
@@ -3609,28 +3312,13 @@ async def _start_game_for(
         except Exception:
             pass
 
-    model_cfg, story_cfg, characters, weapons, world, log_ctx, root = (
+    model_cfg, world, log_ctx, root = (
         _bootstrap_runtime(
             for_server=True,
             selected_story_id=state.selected_story_id or None,
         )
     )
     state.log_ctx = log_ctx
-    try:
-        world.set_weapon_defs(weapons)
-    except Exception as exc:
-        try:
-            ev = Event(
-                event_type=EventType.ERROR,
-                data={
-                    "message": "加载武器表失败",
-                    "error_type": "weapon_defs_load",
-                    "exception": str(exc),
-                },
-            )
-            log_ctx.bus.publish(ev)
-        except Exception:
-            pass
 
     tool_list, tool_dispatch = make_npc_actions(world=world)
 
@@ -3669,47 +3357,15 @@ async def _start_game_for(
         try:
             state.running = True
             await state.bridge.clear()
+            # initialise world selection for this session
             try:
-                story_positions: Dict[str, Tuple[int, int]] = {}
-
-                def _ingest_positions(raw: Any) -> None:
-                    if not isinstance(raw, dict):
-                        return
-                    for actor_name, pos in raw.items():
-                        if isinstance(pos, (list, tuple)) and len(pos) >= 2:
-                            try:
-                                story_positions[str(actor_name)] = (
-                                    int(pos[0]),
-                                    int(pos[1]),
-                                )
-                            except Exception:
-                                continue
-
-                if isinstance(story_cfg, dict):
-                    _ingest_positions(story_cfg.get("initial_positions") or {})
-                    _ingest_positions(story_cfg.get("positions") or {})
-                    initial_section = story_cfg.get("initial")
-                    if isinstance(initial_section, dict):
-                        _ingest_positions(initial_section.get("positions") or {})
-                for nm, (x, y) in story_positions.items():
-                    try:
-                        world.set_position(nm, x, y)
-                    except Exception:
-                        pass
-                if story_positions:
-                    try:
-                        world.set_participants(list(story_positions.keys()))
-                    except Exception:
-                        pass
-                try:
-                    state.last_snapshot = world.snapshot()
-                except Exception:
-                    state.last_snapshot = {}
+                world_impl.select_world(state.selected_story_id or None)
             except Exception:
-                try:
-                    state.last_snapshot = world.snapshot()
-                except Exception:
-                    state.last_snapshot = {}
+                pass
+            try:
+                state.last_snapshot = world.snapshot()
+            except Exception:
+                state.last_snapshot = {}
 
             # Clean prompt dumps at session start; keep only latest per actor during run
             try:
@@ -3744,8 +3400,6 @@ async def _start_game_for(
                 tool_fns=tool_list,
                 tool_dispatch=tool_dispatch,
                 model_cfg=model_cfg,
-                story_cfg=story_cfg,
-                characters=characters,
                 world=world,
                 player_input_provider=lambda actor_name: state.get_player_queue(
                     str(actor_name)
@@ -4061,19 +3715,11 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
 
     # Helper: list available story ids from config (container -> keys; single -> ['default'] or [])
     def _list_story_ids() -> list[str]:
-        ids: list[str] = []
+        # Delegate to world component to avoid duplicating parsing logic
         try:
-            d = _json_load_text(_cfg_path("story"))
-            if isinstance(d, dict):
-                if isinstance(d.get("stories"), dict):
-                    ids = sorted(list((d.get("stories") or {}).keys()))
-                else:
-                    # Treat any non-container dict (including empty {}) as single-story legacy -> 'default'
-                    ids = ["default"]
+            return list(world_impl.list_world_ids())
         except Exception:
-            # keep empty on read error
-            ids = []
-        return ids
+            return []
 
     @app.get("/api/stories")
     async def api_stories(request: Request):  # type: ignore[no-redef]
@@ -4132,92 +3778,9 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
                 {"ok": False, "message": "unknown story id"}, status_code=400
             )
 
-        # Build a fresh world snapshot mirroring server bootstrap logic, but without running the game loop
+        # Build a fresh world snapshot via world component (no session)
         try:
-            model_cfg, story_cfg, characters, weapons, world, log_ctx, root = (
-                _bootstrap_runtime(
-                    for_server=True,
-                    selected_story_id=sid,
-                )
-            )
-            # Make weapon defs available to snapshot consumers
-            try:
-                world.set_weapon_defs(weapons)
-            except Exception:
-                pass
-            try:
-                arts = load_arts() or {}
-                if hasattr(world, "set_arts_defs"):
-                    world.set_arts_defs(arts)
-            except Exception:
-                pass
-
-            # Ingest starting positions from story config (supports initial_positions/positions and initial.positions)
-            story_positions: Dict[str, Tuple[int, int]] = {}
-            try:
-                _parse_story_positions(
-                    story_cfg.get("initial_positions") or {}, story_positions
-                )
-            except Exception:
-                pass
-            try:
-                _parse_story_positions(
-                    story_cfg.get("positions") or {}, story_positions
-                )
-            except Exception:
-                pass
-            try:
-                initial_section = story_cfg.get("initial")
-                if isinstance(initial_section, dict):
-                    _parse_story_positions(
-                        initial_section.get("positions") or {}, story_positions
-                    )
-            except Exception:
-                pass
-            for nm, (x, y) in story_positions.items():
-                try:
-                    world.set_position(nm, x, y)
-                except Exception:
-                    pass
-            if story_positions:
-                try:
-                    world.set_participants(list(story_positions.keys()))
-                except Exception:
-                    pass
-
-            # Apply scene fields (name/objectives/details/weather/time)
-            try:
-                scene_cfg = (
-                    story_cfg.get("scene") if isinstance(story_cfg, dict) else {}
-                )
-                (
-                    scene_name,
-                    scene_objectives,
-                    scene_details,
-                    scene_weather,
-                    scene_time_min,
-                ) = normalize_scene_cfg(scene_cfg)
-                if any(
-                    [
-                        scene_name,
-                        scene_objectives,
-                        scene_details,
-                        scene_weather,
-                        scene_time_min is not None,
-                    ]
-                ):
-                    apply_scene_to_world(
-                        world,
-                        scene_name,
-                        scene_objectives,
-                        scene_details,
-                        scene_weather,
-                        scene_time_min,
-                    )
-            except Exception:
-                pass
-
-            snap = world.snapshot()
+            snap = world_impl.select_world(sid)
             return {"ok": True, "selected": sid, "state": snap}
         except Exception as exc:
             return JSONResponse(

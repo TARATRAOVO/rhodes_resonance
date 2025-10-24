@@ -7,4 +7,7 @@
 //       point to the separately hosted backend, since Vercel does not run this
 //       project's Python/FastAPI + WebSocket server.
 window.RR = window.RR || {};
-window.RR.backendOrigin = "https://inspector-aye-graphs-spend.trycloudflare.com"; // e.g. "https://your-backend.example.com"
+// For local development, talk to the same origin (the FastAPI server that also serves the static files).
+// When deploying the frontend separately from the backend, set this to your backend's origin,
+// e.g. "https://your-backend.example.com" and ensure the backend enables CORS for the frontend origin.
+window.RR.backendOrigin = ""; // empty string => same-origin (recommended for local dev)

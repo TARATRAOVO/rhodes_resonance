@@ -2,6 +2,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Tuple, Any, List, Optional, Set, Union
+from pathlib import Path
+import json
 import math
 import random
 try:
@@ -17,6 +19,88 @@ except Exception:
 class TextBlock(dict):  # type: ignore
         def __init__(self, type: str = "text", text: str = ""):
             super().__init__(type=type, text=text)
+
+
+# --- Config loaders (migrated from main) ---
+# Keep the logic close to the world so the component owns how its data is sourced.
+
+def project_root() -> Path:
+    """Return repository root (folder that contains configs/ and src/).
+
+    Walk upwards from this file to find a directory that contains a
+    `configs/` folder. Fallback heuristics mirror the ones used in main.
+    """
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "configs").exists():
+            return parent
+    try:
+        return (
+            here.parents[1]
+            if (here.parents[1] / "configs").exists()
+            else here.parents[2]
+        )
+    except Exception:
+        return here.parents[1]
+
+
+def _configs_dir() -> Path:
+    return project_root() / "configs"
+
+
+def _load_json(path: Path) -> dict:
+    with path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"expected object at {path}, got {type(data).__name__}")
+    return data
+
+
+def load_story_config(selected_id: Optional[str] = None) -> dict:
+    """Load story configuration.
+
+    Supports two shapes:
+      1) Single-story (legacy): the file is the story object itself.
+      2) Multi-story container: {"active_id": "id", "stories": {"id": {..}, ...}}
+
+    Always returns a single-story object (the active one).
+    """
+    data = _load_json(_configs_dir() / "story.json")
+    if not data:
+        raise FileNotFoundError("configs/story.json is missing or empty; fallback removed")
+    try:
+        if isinstance(data, dict) and isinstance(data.get("stories"), dict):
+            stories = data.get("stories") or {}
+            sid = ""
+            sel = str(selected_id).strip() if selected_id is not None else ""
+            if sel and sel in stories:
+                sid = sel
+            else:
+                sid = sorted(stories.keys())[0] if stories else ""
+            story = stories.get(sid) if sid else None
+            if isinstance(story, dict):
+                return story
+    except Exception:
+        pass
+    return data
+
+
+def load_characters() -> dict:
+    return _load_json(_configs_dir() / "characters.json")
+
+
+def load_weapons() -> dict:
+    return _load_json(_configs_dir() / "weapons.json")
+
+
+def load_arts() -> dict:
+    path = _configs_dir() / "arts.json"
+    if not path.exists():
+        return {}
+    data = _load_json(path)
+    if not isinstance(data, dict):
+        return {}
+    return data
 
 
 # --- Core grid configuration ---
@@ -197,6 +281,227 @@ class World:
 WORLD = World()
 
 # --- tools ---
+
+def _parse_story_positions(obj: Any, out: Dict[str, Tuple[int, int]]) -> None:
+    """Merge name->[x,y] mappings into `out` dict (later calls override earlier)."""
+    if not isinstance(obj, dict):
+        return
+    for k, v in obj.items():
+        if isinstance(v, (list, tuple)) and len(v) >= 2:
+            try:
+                x, y = int(v[0]), int(v[1])
+            except Exception:
+                continue
+            out[str(k)] = (x, y)
+
+
+def _normalize_scene_cfg(sc: Optional[Dict[str, Any]]):
+    name = None
+    objectives: List[str] = []
+    details: List[str] = []
+    weather: Optional[str] = None
+    time_min: Optional[int] = None
+    if isinstance(sc, dict):
+        if isinstance(sc.get("name"), str) and sc["name"].strip():
+            name = sc["name"].strip()
+        objs = sc.get("objectives")
+        if isinstance(objs, list):
+            for obj in objs:
+                if isinstance(obj, str) and obj.strip():
+                    objectives.append(obj.strip())
+        det = sc.get("details")
+        if isinstance(det, str) and det.strip():
+            details = [det.strip()]
+        elif isinstance(det, list):
+            for d in det:
+                if isinstance(d, (str, int, float)):
+                    s = str(d).strip()
+                    if s:
+                        details.append(s)
+        # Accept legacy fields 'description' or 'opening' and append into details
+        for k in ("description", "opening"):
+            v = sc.get(k)
+            if isinstance(v, str) and v.strip():
+                details.append(v.strip())
+        t = sc.get("time")
+        if isinstance(t, str) and t:
+            try:
+                hh_str, mm_str = t.strip().split(":")
+                hh, mm = int(hh_str), int(mm_str)
+                if 0 <= hh < 24 and 0 <= mm < 60:
+                    time_min = hh * 60 + mm
+            except Exception:
+                pass
+        if time_min is None and isinstance(sc.get("time_min"), (int, float)):
+            try:
+                time_min = int(sc.get("time_min"))
+            except Exception:
+                time_min = None
+        if isinstance(sc.get("weather"), str) and sc["weather"].strip():
+            weather = sc["weather"].strip()
+    return name, objectives, details, weather, time_min
+
+
+def init_world_from_configs(*, selected_story_id: Optional[str] = None, reset: bool = True) -> dict:
+    """Initialise WORLD from configs folder in a single call.
+
+    - Loads story/characters/weapons/arts from configs.
+    - Optionally resets WORLD before applying.
+    - Applies weapon/arts defs, character sheets/meta/inventory, positions/participants,
+      scene fields, and relations.
+
+    Returns the current WORLD snapshot for convenience.
+    """
+    if reset:
+        reset_world()
+    # Load tables
+    story = load_story_config(selected_story_id)
+    chars = load_characters()
+    weapons = load_weapons() or {}
+    arts = load_arts() or {}
+    # Weapon/Arts defs
+    try:
+        set_weapon_defs(weapons)
+    except Exception:
+        pass
+    try:
+        set_arts_defs(arts)
+    except Exception:
+        pass
+    # Characters: meta + stat block + inventory
+    actor_entries: Dict[str, Any] = dict(chars or {})
+    # Extract and remove relations from the character map for easier iteration
+    relations_map = dict(actor_entries.pop("relations", {}) or {}) if isinstance(actor_entries, dict) else {}
+    for nm, entry in actor_entries.items():
+        if not isinstance(entry, dict):
+            continue
+        # type hint for agent orchestration (npc/player)
+        try:
+            tval = str((entry or {}).get("type", "npc")).lower()
+            if tval:
+                st = WORLD.characters.setdefault(str(nm), {})
+                st["type"] = tval
+        except Exception:
+            pass
+        # meta
+        try:
+            set_character_meta(
+                nm,
+                persona=entry.get("persona"),
+                appearance=entry.get("appearance"),
+                quotes=entry.get("quotes"),
+            )
+        except Exception:
+            pass
+        # sheet
+        try:
+            coc_block = entry.get("coc")
+            if isinstance(coc_block, dict):
+                set_coc_character_from_config(name=nm, coc=coc_block or {})
+            else:
+                set_coc_character(
+                    name=nm,
+                    characteristics={
+                        "STR": 50,
+                        "DEX": 50,
+                        "CON": 50,
+                        "INT": 50,
+                        "POW": 50,
+                        "APP": 50,
+                        "EDU": 60,
+                        "SIZ": 50,
+                        "LUCK": 50,
+                    },
+                )
+        except Exception:
+            pass
+        # inventory
+        try:
+            inv = entry.get("inventory") or {}
+            if isinstance(inv, dict):
+                for it, cnt in inv.items():
+                    try:
+                        grant_item(target=nm, item=str(it), n=int(cnt))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    # Positions and participants from story
+    positions: Dict[str, Tuple[int, int]] = {}
+    try:
+        _parse_story_positions(story.get("initial_positions") or {}, positions)
+    except Exception:
+        pass
+    try:
+        _parse_story_positions(story.get("positions") or {}, positions)
+    except Exception:
+        pass
+    try:
+        initial = story.get("initial") if isinstance(story, dict) else None
+        if isinstance(initial, dict):
+            _parse_story_positions(initial.get("positions") or {}, positions)
+    except Exception:
+        pass
+    for nm, (x, y) in positions.items():
+        try:
+            set_position(nm, x, y)
+        except Exception:
+            pass
+    try:
+        set_participants(list(positions.keys()))
+    except Exception:
+        pass
+    # Relations from characters config top-level
+    if isinstance(relations_map, dict):
+        for src, mp in relations_map.items():
+            if not isinstance(mp, dict):
+                continue
+            for dst, val in mp.items():
+                try:
+                    score = max(-100, min(100, int(val)))
+                except Exception:
+                    continue
+                try:
+                    set_relation(str(src), str(dst), score, reason="配置设定")
+                except Exception:
+                    pass
+    # Scene from story
+    sc = story.get("scene") if isinstance(story, dict) else None
+    name, obj, det, weather, time_min = _normalize_scene_cfg(sc if isinstance(sc, dict) else None)
+    if any([name, obj, det, weather, time_min is not None]):
+        try:
+            set_scene(
+                name or (WORLD.location or ""),
+                obj or None,
+                append=False,
+                details=det or None,
+                weather=weather,
+                time_min=time_min,
+            )
+        except Exception:
+            pass
+    return WORLD.snapshot()
+
+
+def list_world_ids() -> List[str]:
+    """Return available world ids from configs/story.json.
+
+    - If the file is a container with `stories`, return sorted keys.
+    - If it's a single-story object, return ["default"].
+    - On read error, return [].
+    """
+    try:
+        d = _load_json(_configs_dir() / "story.json")
+        if isinstance(d.get("stories"), dict):
+            return sorted(list((d.get("stories") or {}).keys()))
+        return ["default"]
+    except Exception:
+        return []
+
+
+def select_world(world_id: Optional[str] = None) -> dict:
+    """Convenience wrapper to initialise world for a chosen id and return snapshot."""
+    return init_world_from_configs(selected_story_id=world_id, reset=True)
 
 # ---- Query helpers (pure data; no narration) ----
 def reaction_available(name: str) -> bool:
