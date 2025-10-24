@@ -2313,24 +2313,42 @@ def get_stat_block(name: str) -> ToolResponse:
 
 # ---- Weapons (reach sourced from weapon defs; no auto-move) ----
 def set_weapon_defs(defs: Dict[str, Dict[str, Any]]):
-    """Replace the entire weapon definition table (backward compatible).
+    """Replace the entire weapon definition table (extended schema only).
 
-    Accepts legacy schema used by configs/weapons.json, e.g.:
-      { reach_steps:int, ability:str, damage_expr:str, skill:str, label:str }
-
-    Also tolerates extended fields if present. No schema enforcement here;
-    validation happens during attack resolution.
+    Required per weapon id:
+      - label: str
+      - reach_steps: int (>0)
+      - skill: str
+      - defense_skill: str
+      - damage: NdM[+/-K]
+      - damage_type: 'physical' | 'arts' (free string, engine treats others as physical)
+    Legacy fields like ability/damage_expr are not supported.
     """
     try:
         cleaned: Dict[str, Dict[str, Any]] = {}
         for k, v in (defs or {}).items():
             d = dict(v or {})
-            # Drop legacy noisy fields we never use
-            d.pop("proficient_default", None)
+            # Basic validation
+            missing = [
+                f for f in ("label", "reach_steps", "skill", "defense_skill", "damage", "damage_type")
+                if f not in d
+            ]
+            if missing:
+                raise ValueError(f"weapon {k} missing fields: {', '.join(missing)}")
+            try:
+                rs = int(d.get("reach_steps"))
+                if rs <= 0:
+                    raise ValueError
+            except Exception:
+                raise ValueError(f"weapon {k}.reach_steps must be > 0 integer")
+            # Strip legacy keys if present; they are ignored
+            for legacy in ("ability", "damage_expr", "proficient_default"):
+                d.pop(legacy, None)
             cleaned[str(k)] = d
         WORLD.weapon_defs = cleaned
     except Exception:
         WORLD.weapon_defs = {}
+        raise
     return ToolResponse(content=[TextBlock(type="text", text=f"武器表载入：{len(WORLD.weapon_defs)} 项")], metadata={"count": len(WORLD.weapon_defs)})
 
 
@@ -2346,10 +2364,11 @@ def attack_with_weapon(
     weapon: str,
     advantage: str = "none",
 ) -> ToolResponse:
-    """Attack using a named weapon from WORLD.weapon_defs.
+    """Attack using a named weapon (extended schema only).
 
     - No auto-move; if distance > reach_steps, fail early.
-    - ability/damage_expr are sourced from weapon defs with safe defaults.
+    - Uses weapon.skill vs weapon.defense_skill; damage from weapon.damage (NdM[+/-K]).
+    - damage_type controls armor/barrier reduction.
     """
     # participants gate: when participants are set, both attacker and defender must be participants
     if WORLD.participants:
@@ -2369,128 +2388,7 @@ def attack_with_weapon(
     except Exception:
         reach_steps = int(DEFAULT_REACH_STEPS)
 
-    # Choose schema: prefer extended when extended keys present
-    is_extended = ("damage" in w) or ("defense_skill" in w) or ("damage_type" in w)
-    # legacy if classic fields exist AND not extended
-    is_legacy = ("damage_expr" in w) or ("ability" in w)
-    if is_legacy and not is_extended:
-        ability = str(w.get("ability", "STR")).upper()
-        # damage_expr is now required for legacy weapons; no implicit default.
-        if not str(w.get("damage_expr") or "").strip():
-            return ToolResponse(
-                content=[TextBlock(type="text", text=f"武器缺少伤害表达式 damage_expr: {weapon}")],
-                metadata={"ok": False, "error_type": "weapon_damage_expr_missing", "weapon_id": weapon},
-            )
-        damage_expr = str(w.get("damage_expr"))
-        base_mod = _coc_ability_mod_for(attacker, ability)
-        # Distance string helper
-        def _fmt_distance(steps: Optional[int]) -> str:
-            if steps is None:
-                return "未知"
-            return format_distance_steps(int(steps))
-        # Ownership gate
-        bag = WORLD.inventory.get(str(attacker), {}) or {}
-        if int(bag.get(str(weapon), 0)) <= 0:
-            msg = TextBlock(type="text", text=f"{attacker} 未持有武器 {weapon}，攻击取消。")
-            return ToolResponse(content=[msg], metadata={"ok": False, "error_type": "weapon_not_owned", "attacker": attacker, "defender": defender, "weapon_id": weapon})
-        # Guard interception
-        pre_logs: List[TextBlock] = []
-        guard_meta: Optional[Dict[str, Any]] = None
-        new_defender, meta_guard, pre = _resolve_guard_interception(attacker, defender, reach_steps)
-        if new_defender != defender:
-            defender = new_defender
-        if pre:
-            pre_logs.extend(pre)
-        if meta_guard:
-            guard_meta = dict(meta_guard)
-        # Range gate
-        dfd = WORLD.characters.get(defender, {})
-        distance_before = get_distance_steps_between(attacker, defender)
-        if distance_before is not None and distance_before > reach_steps:
-            msg = TextBlock(type="text", text=f"距离不足：{attacker} 使用 {weapon} 攻击 {defender} 失败（距离 {_fmt_distance(distance_before)}，触及 {_fmt_distance(reach_steps)}）")
-            return ToolResponse(
-                content=pre_logs + [msg],
-                metadata={
-                    "ok": False,
-                    "error_type": "out_of_reach",
-                    "attacker": attacker,
-                    "defender": defender,
-                    "weapon_id": weapon,
-                    "hit": False,
-                    "reach_ok": False,
-                    "distance_before": distance_before,
-                    "distance_after": distance_before,
-                    "reach_steps": reach_steps,
-                    **({"guard": guard_meta} if guard_meta else {}),
-                },
-            )
-        # Attack resolution
-        skill_name = str(w.get("skill")) if w.get("skill") else _weapon_skill_for(weapon, reach_steps, ability)
-        parts: List[TextBlock] = list(pre_logs)
-        success = False
-        oppose = None
-        atk_res = None
-        if _is_dying(defender):
-            parts.append(TextBlock(type="text", text=f"对抗跳过：{defender} 濒死，本次仅进行命中检定"))
-            atk_res = skill_check_coc(attacker, skill_name)
-            if atk_res.content:
-                for blk in atk_res.content:
-                    if isinstance(blk, dict) and blk.get("type") == "text":
-                        parts.append(blk)
-            success = bool((atk_res.metadata or {}).get("success"))
-        else:
-            oppose = contest(attacker, skill_name, defender, "Dodge")
-            if oppose.content:
-                for blk in oppose.content:
-                    if isinstance(blk, dict) and blk.get("type") == "text":
-                        parts.append(blk)
-            winner = (oppose.metadata or {}).get("winner")
-            success = (winner == attacker)
-        hp_before = int(WORLD.characters.get(defender, {}).get("hp", dfd.get("hp", 0)))
-        dmg_total = 0
-        if success:
-            dmg_expr2 = _replace_ability_tokens(damage_expr, base_mod)
-            # If any alpha token other than the dice 'd' remains, treat as invalid.
-            # This allows forms like '1d6+1' while rejecting stray tokens (e.g., 'POW').
-            import re as _re
-            _chk = _re.sub(r"[dD]", "", str(dmg_expr2))
-            if _re.search(r"[A-Za-z]", _chk):
-                return ToolResponse(content=parts + [TextBlock(type="text", text=f"武器伤害表达式不被支持：{damage_expr}")], metadata={"ok": False, "error_type": "damage_expr_invalid", "weapon_id": weapon})
-            dmg_res = roll_dice(dmg_expr2)
-            total = int((dmg_res.metadata or {}).get("total", 0))
-            dmg_total = total
-            dmg_apply = damage(defender, total)
-            parts.append(TextBlock(type="text", text=f"伤害：{dmg_expr2} -> {total}"))
-            for blk in (dmg_apply.content or []):
-                if isinstance(blk, dict) and blk.get("type") == "text":
-                    parts.append(blk)
-        hp_after = int(WORLD.characters.get(defender, {}).get("hp", dfd.get("hp", 0)))
-        distance_after = distance_before
-        WORLD._touch()
-        return ToolResponse(
-            content=parts,
-            metadata={
-                "ok": True,
-                "attacker": attacker,
-                "defender": defender,
-                "weapon_id": weapon,
-                "hit": success,
-                "base_mod": int(base_mod),
-                "damage_total": int(dmg_total),
-                "hp_before": int(hp_before),
-                "hp_after": int(hp_after),
-                "reach_ok": True,
-                "distance_before": distance_before,
-                "distance_after": distance_after,
-                "reach_steps": reach_steps,
-                **({"guard": guard_meta} if guard_meta else {}),
-                **(
-                    {"opposed": False, "defender_dying": True, "attack_check": (atk_res.metadata if atk_res else None)}
-                    if _is_dying(defender)
-                    else ({"opposed": True, "opposed_meta": (oppose.metadata if oppose else None)})
-                ),
-            },
-        )
+    # Extended-only implementation continues below
 
     # Branch B: extended schema (damage/defense_skill/damage_type)
     try:
