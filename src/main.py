@@ -104,8 +104,8 @@ DEFAULT_PROMPT_HEADER = (
     "你是：{name}.\n"
     "人设：{persona}\n"
     "外观特征：{appearance}\n"
-    "常用语气/台词：{quotes}\n"
-    "当前立场提示（仅你视角）：{relation_brief}\n"
+    "你之前说过这些话：{quotes}\n"
+    "这些是场上你的朋友，或者敌人：{relation_brief}\n"
 )
 
 # --- JSON-only template (active when JSON_ONLY_MODE=True) ---
