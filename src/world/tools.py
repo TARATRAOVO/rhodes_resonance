@@ -2358,6 +2358,104 @@ def define_weapon(weapon_id: str, data: Dict[str, Any]):
     return ToolResponse(content=[TextBlock(type="text", text=f"武器登记：{wid}")], metadata={"id": wid, **WORLD.weapon_defs[wid]})
 
 
+# ---- Attack pipeline (pure-ish helpers) ----
+
+def _attack_resolve_guard_interception(attacker: str, defender: str, reach_steps: int) -> tuple[str, Optional[Dict[str, Any]], List[TextBlock]]:
+    """Resolve protection/guard interception without mutating attacker/defender state.
+
+    Returns: (final_defender, guard_meta, pre_logs)
+    """
+    pre_logs: List[TextBlock] = []
+    guard_meta: Optional[Dict[str, Any]] = None
+    new_defender, meta_guard, pre = _resolve_guard_interception(attacker, defender, reach_steps)
+    if pre:
+        pre_logs.extend(pre)
+    if meta_guard:
+        guard_meta = dict(meta_guard)
+    return (new_defender, guard_meta, pre_logs)
+
+
+def _attack_compute_distance(attacker: str, defender: str) -> Optional[int]:
+    try:
+        return get_distance_steps_between(attacker, defender)
+    except Exception:
+        return None
+
+
+def _attack_run_check_or_contest(
+    attacker: str,
+    defender: str,
+    *,
+    skill_name: str,
+    defense_skill_name: str,
+) -> tuple[bool, List[TextBlock], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Run opposed check (or single check if defender dying). Returns:
+    (success, logs, opposed_meta_or_none, attack_check_meta_or_none)
+    """
+    parts: List[TextBlock] = []
+    oppose_meta: Optional[Dict[str, Any]] = None
+    atk_check_meta: Optional[Dict[str, Any]] = None
+    if _is_dying(defender):
+        parts.append(TextBlock(type="text", text=f"对抗跳过：{defender} 濒死，本次仅进行命中检定"))
+        atk_res = skill_check_coc(attacker, skill_name)
+        if atk_res.content:
+            for blk in atk_res.content:
+                if isinstance(blk, dict) and blk.get("type") == "text":
+                    parts.append(blk)
+        atk_check_meta = dict(atk_res.metadata or {})
+        return bool((atk_res.metadata or {}).get("success")), parts, None, atk_check_meta
+    # Opposed check
+    oppose = contest(attacker, skill_name, defender, defense_skill_name)
+    if oppose.content:
+        for blk in oppose.content:
+            if isinstance(blk, dict) and blk.get("type") == "text":
+                parts.append(blk)
+    oppose_meta = dict(oppose.metadata or {})
+    winner = (oppose.metadata or {}).get("winner")
+    return (winner == attacker), parts, oppose_meta, None
+
+
+def _attack_apply_damage(
+    defender: str,
+    *,
+    damage_expr_base: str,
+    damage_type: str,
+    defender_sheet: Dict[str, Any],
+) -> tuple[List[TextBlock], int, int, int]:
+    """Apply damage to defender and return (logs, total, reduced, final).
+
+    This step mutates world state (HP) via damage().
+    """
+    logs: List[TextBlock] = []
+    dmg_res = roll_dice(damage_expr_base)
+    total = int((dmg_res.metadata or {}).get("total", 0))
+    # Fixed reduction by armor/barrier depending on damage_type
+    reduced = 0
+    final = total
+    try:
+        coc_d = dict(defender_sheet.get("coc") or {})
+        terra = dict(coc_d.get("terra") or {})
+        prot = dict(terra.get("protection") or {})
+        if str(damage_type).lower() == "arts":
+            reduced = max(0, int(prot.get("arts_barrier", 0)))
+        else:
+            reduced = max(0, int(prot.get("physical_armor", 0)))
+    except Exception:
+        reduced = 0
+    final = max(0, total - int(reduced))
+    dmg_apply = damage(defender, final)
+    logs.append(
+        TextBlock(
+            type="text",
+            text=f"伤害：{damage_expr_base} -> {total}{('（减伤 ' + str(reduced) + '）') if reduced else ''}",
+        )
+    )
+    for blk in (dmg_apply.content or []):
+        if isinstance(blk, dict) and blk.get("type") == "text":
+            logs.append(blk)
+    return logs, int(total), int(reduced), int(final)
+
+
 def attack_with_weapon(
     attacker: str,
     defender: str,
@@ -2423,20 +2521,12 @@ def attack_with_weapon(
         )
 
     # Protection interception (may change defender)
-    pre_logs: List[TextBlock] = []
-    # Preview handled by main; keep pre_logs for guard messages only
-    guard_meta: Optional[Dict[str, Any]] = None
-    new_defender, meta_guard, pre = _resolve_guard_interception(attacker, defender, reach_steps)
-    if new_defender != defender:
-        defender = new_defender
-    if pre:
-        pre_logs.extend(pre)
-    if meta_guard:
-        guard_meta = dict(meta_guard)
+    defender2, guard_meta, pre_logs = _attack_resolve_guard_interception(attacker, defender, reach_steps)
+    defender = defender2
 
     # Post-interception snapshot for defender stat and distance gate
     dfd = WORLD.characters.get(defender, {})
-    distance_before = get_distance_steps_between(attacker, defender)
+    distance_before = _attack_compute_distance(attacker, defender)
     if distance_before is not None and distance_before > reach_steps:
         msg = TextBlock(type="text", text=f"距离不足：{attacker} 使用 {weapon} 攻击 {defender} 失败（距离 {_fmt_distance(distance_before)}，触及 {_fmt_distance(reach_steps)}）")
         return ToolResponse(
@@ -2465,83 +2555,51 @@ def attack_with_weapon(
             metadata={"ok": False, "error_type": "weapon_def_invalid", "weapon_id": weapon},
         )
     parts: List[TextBlock] = list(pre_logs)
-    success = False
-    oppose = None
-    atk_res = None
-    if _is_dying(defender):
-        # Defender is dying: skip Dodge opposition; perform single-sided hit check
-        parts.append(TextBlock(type="text", text=f"对抗跳过：{defender} 濒死，本次仅进行命中检定"))
-        atk_res = skill_check_coc(attacker, skill_name)
-        if atk_res.content:
-            for blk in atk_res.content:
-                if isinstance(blk, dict) and blk.get("type") == "text":
-                    parts.append(blk)
-        success = bool((atk_res.metadata or {}).get("success"))
-    else:
-        # Perform opposed check vs configured defense skill (default Dodge)
-        oppose = contest(attacker, skill_name, defender, defense_skill_name)
-        if oppose.content:
-            for blk in oppose.content:
-                if isinstance(blk, dict) and blk.get("type") == "text":
-                    parts.append(blk)
-        winner = (oppose.metadata or {}).get("winner")
-        success = (winner == attacker)
+    success, logs_check, oppose_meta, atk_check_meta = _attack_run_check_or_contest(
+        attacker,
+        defender,
+        skill_name=skill_name,
+        defense_skill_name=defense_skill_name,
+    )
+    if logs_check:
+        parts.extend(logs_check)
     hp_before = int(WORLD.characters.get(defender, {}).get("hp", dfd.get("hp", 0)))
     dmg_total = 0
     if success:
-        # Base damage only (no attribute bonus / DB / impale)
-        dmg_res = roll_dice(damage_expr_base)
-        total = int((dmg_res.metadata or {}).get("total", 0))
-        # Fixed reduction by armor/barrier depending on damage_type
-        reduced = 0
-        final = total
-        try:
-            coc_d = dict(dfd.get("coc") or {})
-            terra = dict(coc_d.get("terra") or {})
-            prot = dict(terra.get("protection") or {})
-            if damage_type == "arts":
-                barrier = max(0, int(prot.get("arts_barrier", 0)))
-                reduced = barrier
-            else:
-                armor = max(0, int(prot.get("physical_armor", 0)))
-                reduced = armor
-        except Exception:
-            reduced = 0
-        final = max(0, total - int(reduced))
+        dmg_logs, total, reduced, final = _attack_apply_damage(
+            defender,
+            damage_expr_base=damage_expr_base,
+            damage_type=damage_type,
+            defender_sheet=dfd,
+        )
+        parts.extend(dmg_logs)
         dmg_total = final
-        dmg_apply = damage(defender, final)
-        parts.append(TextBlock(type="text", text=f"伤害：{damage_expr_base} -> {total}{('（减伤 ' + str(reduced) + '）') if reduced else ''}"))
-        for blk in (dmg_apply.content or []):
-            if isinstance(blk, dict) and blk.get("type") == "text":
-                parts.append(blk)
     hp_after = int(WORLD.characters.get(defender, {}).get("hp", dfd.get("hp", 0)))
     distance_after = distance_before
     # Any hit/miss still mutates state through damage(); touch once per attack
     WORLD._touch()
-    return ToolResponse(
-        content=parts,
-        metadata={
-            "ok": True,
-            "attacker": attacker,
-            "defender": defender,
-            "weapon_id": weapon,
-            "hit": success,
-            "base_mod": 0,
-            "damage_total": int(dmg_total),
-            "hp_before": int(hp_before),
-            "hp_after": int(hp_after),
-            "reach_ok": True,
-            "distance_before": distance_before,
-            "distance_after": distance_after,
-            "reach_steps": reach_steps,
-            **({"guard": guard_meta} if guard_meta else {}),
-            **(
-                {"opposed": False, "defender_dying": True, "attack_check": (atk_res.metadata if atk_res else None)}
-                if _is_dying(defender)
-                else ({"opposed": True, "opposed_meta": (oppose.metadata if oppose else None)})
-            ),
-        },
-    )
+    meta: Dict[str, Any] = {
+        "ok": True,
+        "attacker": attacker,
+        "defender": defender,
+        "weapon_id": weapon,
+        "hit": success,
+        "base_mod": 0,
+        "damage_total": int(dmg_total),
+        "hp_before": int(hp_before),
+        "hp_after": int(hp_after),
+        "reach_ok": True,
+        "distance_before": distance_before,
+        "distance_after": distance_after,
+        "reach_steps": reach_steps,
+        **({"guard": guard_meta} if guard_meta else {}),
+    }
+    # Attach contest/check metadata to align with previous behavior
+    if _is_dying(defender):
+        meta.update({"opposed": False, "defender_dying": True, "attack_check": atk_check_meta})
+    else:
+        meta.update({"opposed": True, "opposed_meta": oppose_meta})
+    return ToolResponse(content=parts, metadata=meta)
 
 
 def _replace_ability_tokens(expr: str, ability_mod: int) -> str:
@@ -2822,10 +2880,21 @@ def cast_arts(attacker: str, art: str, target: Optional[str] = None, center: Opt
     if not tgt:
         return ToolResponse(content=[TextBlock(type="text", text="缺少目标 target")], metadata={"ok": False, "error_type": "missing_param", "param": "target"})
 
-    # Range check
-    dist = get_distance_steps_between(attacker, tgt)
+    # Optional guard interception: default off to preserve current semantics.
+    pre_logs: List[TextBlock] = []
+    guard_meta: Optional[Dict[str, Any]] = None
+    allow_guard = ("guard-intercept" in tags) or ("allow-guard-intercept" in tags)
+    if allow_guard:
+        tgt2, guard_meta, pre_logs = _attack_resolve_guard_interception(attacker, tgt, rng)
+        tgt = tgt2
+
+    # Range check（after possible guard interception）
+    dist = _attack_compute_distance(attacker, tgt)
     if dist is None or dist > rng:
-        return ToolResponse(content=[TextBlock(type="text", text=f"距离不足：{attacker}->{tgt} {dist if dist is not None else '?'}步/触及{rng}步")], metadata={"ok": False, "error_type": "out_of_reach"})
+        return ToolResponse(
+            content=pre_logs + [TextBlock(type="text", text=f"距离不足：{attacker}->{tgt} {dist if dist is not None else '?'}步/触及{rng}步")],
+            metadata={"ok": False, "error_type": "out_of_reach", **({"guard": guard_meta} if guard_meta else {})},
+        )
 
     # Line-of-sight check (simplified via cover)
     if "line-of-sight" in tags:
@@ -2849,28 +2918,22 @@ def cast_arts(attacker: str, art: str, target: Optional[str] = None, center: Opt
         return spent_res
 
     # Contest / check
-    parts: List[TextBlock] = []
-    success = False
-    oppose = None
-    atk_res = None
-    if _is_dying(tgt):
-        parts.append(TextBlock(type="text", text=f"对抗跳过：{tgt} 濒死，本次仅进行命中检定"))
-        atk_res = skill_check_coc(attacker, cast_skill)
-        for blk in (atk_res.content or []):
-            if isinstance(blk, dict) and blk.get("type") == "text":
-                parts.append(blk)
-        success = bool((atk_res.metadata or {}).get("success"))
-    else:
-        # Resist via skill only (POW removed)
-        oppose = contest(attacker, cast_skill, tgt, resist)
-        for blk in (oppose.content or []):
-            if isinstance(blk, dict) and blk.get("type") == "text":
-                parts.append(blk)
-        winner = (oppose.metadata or {}).get("winner")
-        success = (winner == attacker)
+    parts: List[TextBlock] = list(pre_logs)
+    success, logs_check, oppose_meta, atk_check_meta = _attack_run_check_or_contest(
+        attacker,
+        tgt,
+        skill_name=cast_skill,
+        defense_skill_name=resist,
+    )
+    if logs_check:
+        parts.extend(logs_check)
 
     # Success level only for narration; no multiplier in damage/heal
-    level = (atk_res.metadata or {}).get("success_level") if atk_res else ((oppose.metadata or {}).get("a", {}) if oppose else {}).get("success_level")
+    level = (
+        (atk_check_meta or {}).get("success_level")
+        if atk_check_meta is not None
+        else (oppose_meta or {}).get("a", {}).get("success_level")
+    )
     lvl = str(level or "fail")
     mult = 1.0
 
@@ -2891,27 +2954,17 @@ def cast_arts(attacker: str, art: str, target: Optional[str] = None, center: Opt
                 content=parts + [TextBlock(type="text", text=f"术式伤害表达式不被支持：{dmg_expr}")],
                 metadata={"ok": False, "error_type": "art_damage_expr_invalid", "expr": dmg_expr},
             )
-        roll = roll_dice(expr)
-        val = int((roll.metadata or {}).get("total", 0))
-        # reduction
-        reduced = 0
-        try:
-            coc_d = dict((WORLD.characters.get(tgt, {}) or {}).get("coc") or {})
-            terra = dict(coc_d.get("terra") or {})
-            prot = dict(terra.get("protection") or {})
-            if dtype == "arts":
-                reduced = max(0, int(prot.get("arts_barrier", 0)))
-            else:
-                reduced = max(0, int(prot.get("physical_armor", 0)))
-        except Exception:
-            reduced = 0
-        final = max(0, val - reduced)
+        # Apply using unified damage step
+        dfd = WORLD.characters.get(tgt, {})
+        dmg_logs, total, reduced, final = _attack_apply_damage(
+            tgt,
+            damage_expr_base=expr,
+            damage_type=dtype,
+            defender_sheet=dfd,
+        )
+        # Reword first log for arts clarity (optional; keep as-is for consistency)
+        parts.extend(dmg_logs)
         dmg_total = final
-        parts.append(TextBlock(type="text", text=f"术式伤害：{expr} -> {val}{('（减伤 ' + str(reduced) + '）') if reduced else ''}"))
-        dmg_apply = damage(tgt, final)
-        for blk in (dmg_apply.content or []):
-            if isinstance(blk, dict) and blk.get("type") == "text":
-                parts.append(blk)
         effects.append({"who": tgt, "damage": final, "reduced_by": reduced})
 
     if success and heal_expr:
@@ -2969,6 +3022,8 @@ def cast_arts(attacker: str, art: str, target: Optional[str] = None, center: Opt
         "hp_after": hp_after,
         "effects": effects,
     }
+    if guard_meta:
+        meta["guard"] = guard_meta
     return ToolResponse(content=parts, metadata=meta)
 
 

@@ -1,7 +1,7 @@
 {
   "doctor_knife": {
     "label": "战术小刀",
-    "reach_steps": 1,
+    "reach_steps": 2,
     "skill": "Fighting_Blade",
     "defense_skill": "Dodge",
     "damage": "1d4",
@@ -9,7 +9,7 @@
   },
   "doctor_baton": {
     "label": "战术警棍",
-    "reach_steps": 1,
+    "reach_steps": 2,
     "skill": "Fighting_Blunt",
     "defense_skill": "Dodge",
     "damage": "1d4",
