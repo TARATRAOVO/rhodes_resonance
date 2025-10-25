@@ -910,9 +910,7 @@ class _WorldPort:
     set_position = staticmethod(world_impl.set_position)
     set_scene = staticmethod(world_impl.set_scene)
     set_relation = staticmethod(world_impl.set_relation)
-    get_turn = staticmethod(world_impl.get_turn)
     reset_actor_turn = staticmethod(world_impl.reset_actor_turn)
-    end_combat = staticmethod(world_impl.end_combat)
     # CoC 7e support (DnD compatibility removed)
     set_coc_character = staticmethod(world_impl.set_coc_character)
     set_coc_character_from_config = staticmethod(
@@ -947,6 +945,8 @@ class _WorldPort:
     reachable_targets_for_weapon = staticmethod(world_impl.reachable_targets_for_weapon)
     reachable_targets_for_art = staticmethod(world_impl.reachable_targets_for_art)
     get_distance_steps_between = staticmethod(world_impl.get_distance_steps_between)
+    # initiative/order helpers (side-effect-free)
+    compute_action_order = staticmethod(world_impl.compute_action_order)
     # engine-facing rule queries
     is_dead = staticmethod(world_impl.is_dead)
     hostiles_present = staticmethod(world_impl.hostiles_present)
@@ -964,9 +964,7 @@ class _WorldPort:
         return {
             "version": int(getattr(W, "version", 0)),
             "positions": dict(W.positions),
-            "in_combat": bool(W.in_combat),
             "turn_state": dict(W.turn_state),
-            "round": int(W.round),
             "characters": dict(W.characters),
             "participants": list(getattr(W, "participants", []) or []),
         }
@@ -1577,14 +1575,12 @@ def emit_turn_state(ctx: TurnContext) -> None:
     try:
         rt = ctx.world.runtime()
         positions = rt.get("positions", {})
-        in_combat = bool(rt.get("in_combat"))
         r_avail = rt.get("turn_state", {})
         ctx.emit(
             "state_update",
             phase="turn-state",
             data={
                 "positions": {k: list(v) for k, v in positions.items()},
-                "in_combat": in_combat,
                 "reaction_available": r_avail,
             },
         )
@@ -1921,6 +1917,23 @@ async def run_demo(
     """Run the NPC talk demo (sequential group chat, no GM/adjudication)."""
 
     # System prompt assembly uses policy and world snapshot
+    # Ensure action order is computed by world (side-effect-free) and applied by main
+    try:
+        if hasattr(world, "compute_action_order"):
+            _res = world.compute_action_order()
+            try:
+                _meta = getattr(_res, "metadata", {}) or {}
+                _order = list(_meta.get("order") or _meta.get("initiative") or [])
+            except Exception:
+                _order = []
+            if _order:
+                try:
+                    world.set_participants(_order)
+                except Exception:
+                    pass
+    except Exception:
+        # Never fail run due to ordering issues
+        pass
     # Build actors from WORLD snapshot
     snap0 = world.snapshot()
     char_map = dict(snap0.get("characters") or {})
@@ -2239,9 +2252,24 @@ async def run_demo(
 
         while True:
             try:
-                rt = world.runtime()
-                hdr_round_val = int(rt.get("round") or round_idx)
-                hdr_round = hdr_round_val if bool(rt.get("in_combat")) else round_idx
+                # Dynamic reordering at the start of each round (DEX by default)
+                try:
+                    if hasattr(world, "compute_action_order"):
+                        _res = world.compute_action_order(allowed_names_world)
+                        _meta = getattr(_res, "metadata", {}) or {}
+                        _order = list(_meta.get("order") or _meta.get("initiative") or [])
+                        if _order:
+                            try:
+                                world.set_participants(_order)
+                            except Exception:
+                                pass
+                            # Update local iteration order to reflect world decision
+                            allowed_names_world = list(_order)
+                except Exception:
+                    pass
+
+                # Header round index is managed by main; world no longer exposes combat rounds
+                hdr_round = round_idx
             except Exception:
                 hdr_round = round_idx
             current_round = hdr_round
@@ -2253,14 +2281,7 @@ async def run_demo(
                 Msg("Host", f"第{hdr_round}回合", "assistant"),
                 phase="round-start",
             )
-            try:
-                turn = world.get_turn()
-                meta = turn.metadata or {}
-                rnd = int(meta.get("round") or round_idx)
-                if bool((world.runtime().get("in_combat"))):
-                    current_round = rnd
-            except Exception:
-                pass
+            # world.get_turn() no longer used to drive round numbering
 
             emit_turn_state(ctx)
             emit_world_state(ctx, current_round)
@@ -2268,11 +2289,6 @@ async def run_demo(
 
             # If无敌对，则退出战斗模式但不强制结束整体流程（除非显式要求）
             if not world.hostiles_present(allowed_names_world or None, RELATION_HOSTILE):
-                try:
-                    if bool(world.runtime().get("in_combat")):
-                        world.end_combat()
-                except Exception:
-                    pass
                 if require_hostiles:
                     end_reason = "场上已无敌对存活单位"
                     break
@@ -2561,11 +2577,6 @@ async def run_demo(
 
                 # After each action, if无敌对则退出战斗但继续对话流程
                 if not world.hostiles_present(allowed_names_world or None, RELATION_HOSTILE):
-                    try:
-                        if bool(world.runtime().get("in_combat")):
-                            world.end_combat()
-                    except Exception:
-                        pass
                     if require_hostiles:
                         end_reason = "场上已无敌对存活单位"
                         combat_cleared = True

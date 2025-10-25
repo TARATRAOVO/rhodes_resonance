@@ -13,7 +13,7 @@
   * tool 取自：perform_attack, cast_arts, advance_position, adjust_relation, transfer_item, set_protection, clear_protection, first_aid；
   * args 为严格 JSON（双引号）；必须包含简短 reason(≤30字)；
     - 坐标参数使用数组 [x,y] 且为整数；
-    - 角色名称仅可使用：Amiya, Doctor, Faust, Mephisto；
+    - 角色名称仅可使用：Faust, Doctor, Amiya, Mephisto；
 - 硬规则：只能对 reach_preview 中的可及目标使用 perform_attack；不满足触及时应先 advance_position。
 输出示例（仅供你参考，不要输出这段文字）：
 {"speech": ["阿米娅：小心前方。"], "description": ["她压低身形，向前探查。", "不能让他们受伤。"], "actions": [{"tool": "advance_position", "args": {"name": "Amiya", "target": [1,1], "reason": "靠近掩体"}}]}
@@ -23,38 +23,42 @@
 现在：地点 旧城区·北侧仓棚；时间 08:00；天气 overcast
 环境细节：仓棚顶板破损，几缕晨光穿透尘埃；木箱凌乱堆叠，角落潮湿有拖拽痕迹；远处传来金属碰撞与杂音；旧城区·北侧仓棚。铁梁回声震耳。
 目标：冲突终结(pending)
-坐标：Amiya(5, 1); Doctor(5, 1); Faust(12, 2); Mephisto(5, 1)
-角色：Doctor(HP 11/11); Amiya(HP 6/10); Mephisto(HP 10/11); Faust(HP 12/12)
+坐标：Amiya(3, 1); Doctor(3, 1); Faust(7, 2); Mephisto(7, -1)
+角色：Doctor(HP 11/11); Amiya(HP 7/10); Mephisto(HP 11/11); Faust(HP 11/12)
 
 --- [recap] ---
 回顾
 刚才...：
-- Amiya: 阿米娅的耳羽微颤，弦音未散便已咏唱。
-- Amiya[tool]: 对抗：Amiya(Arts_Control)[regular] vs Mephisto(Arts_Resist)[fail] -> Amiya 胜
-伤害：1d4 -> 2（减伤 1）
-Mephisto 受到 1 伤害，HP 10/11
+- Amiya: 博士，我没事。先压制浮士德，别给他再拉弓的机会。
+- Amiya: 阿米娅抬手抹去额角血痕，指尖源石辉光聚成咒锁。
+- Amiya[tool]: 对抗：Amiya(Arts_Control)[extreme] vs Faust(Arts_Resist)[fail] -> Amiya 胜
+伤害：1d4 -> 1
+Faust 受到 1 伤害，HP 11/12
 控制：restrained（持续 1 轮）
-状态：Mephisto +rest...
-- Doctor: 阿米娅，退开。
-- Doctor: 我抬手抽出战术短刃，灰瞳锁定Mephisto的咽喉。
-- Doctor: 杀意已决，无需多言。
-- Doctor[tool]: Doctor 处于sleep状态，无法发动攻击。
+状态：Faust +restrained（1轮）
+- Mephisto: 浮士德，别被那小兔子锁住——听我的乐章，让她跪下。
+- Mephisto: 梅菲斯特扬起手杖，嘴角含笑，绿瞳里却燃着疯火。
+- Mephisto[tool]: 对抗：Mephisto(Arts_Control)[regular] vs Amiya(Arts_Resist)[fail] -> Mephisto 胜
+控制：sleep（持续 1 轮）
+状态：Amiya +sleep（1轮）
 
 --- [reach_preview] ---
 作战规则：只能对reach_preview的“可及目标”使用 perform_attack。
-可及武器（faust_crossbow，触及 12步）可用目标：Amiya(8步), Doctor(8步), Mephisto(8步)
+可及武器（faust_crossbow，触及 12步）可用目标：Mephisto(3步), Amiya(5步), Doctor(5步)
 
 --- [private] ---
 优先处理对白（仅你可见）：
 - 说话者：Doctor
-- 内容：杀意已决，无需多言。
+- 内容：必须打断他们的火力链，否则阿米娅会被逐步蚕食。
 - 你对该角色的关系：-80（死敌）
 回合资源（仅你可见）：
 - 移动：5/5 步
 - 动作：可用；附赠动作：可用；反应：可用
 作战规则：只能对reach_preview的“可及目标”使用 perform_attack。
 有效行动要求：存在敌对关系时，每回合必须进行一次有效行动；对超出触及范围的 perform_attack 视为无效。
+你现在...：
+- 束缚：被网缚/钳制，行动受限（剩余 1 回合，禁止移动与攻击）。
 距离提示（仅你可见）：
-- Amiya：8步
-- Doctor：8步
-- Mephisto：8步
+- Mephisto：3步
+- Amiya：5步
+- Doctor：5步

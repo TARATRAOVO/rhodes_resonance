@@ -189,12 +189,8 @@ class World:
     marks: List[str] = field(default_factory=list)
     # Compatibility: legacy field referenced by tests; remains a no-op container
     hidden_enemies: Dict[str, Any] = field(default_factory=dict)
-    # --- Combat (rounds) ---
-    in_combat: bool = False
-    round: int = 1
-    turn_idx: int = 0
-    initiative_order: List[str] = field(default_factory=list)
-    initiative_scores: Dict[str, int] = field(default_factory=dict)
+    # --- Combat (rounds) removed ---
+    # World no longer owns turn/round/initiative state; orchestrator drives order
     # per-turn tokens/state for each name
     turn_state: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     # default walking speeds stored as grid steps
@@ -262,14 +258,8 @@ class World:
             "marks": list(self.marks),
             "participants": list(self.participants),
             "guardians": {k: list(v) for k, v in self.guardians.items()},
-            "combat": {
-                "in_combat": bool(self.in_combat),
-                "round": int(self.round),
-                "turn_idx": int(self.turn_idx),
-                "initiative": list(self.initiative_order),
-                "initiative_scores": dict(self.initiative_scores),
-                "turn_state": {k: dict(v) for k, v in self.turn_state.items()},
-            },
+            # combat snapshot removed: world no longer exposes round/initiative/in_combat at the API level
+            # per-turn resource state remains accessible via runtime() for orchestrator only
             # Weapon data
             "weapons": sorted(list(self.weapon_defs.keys())),
             "weapon_defs": _weapon_summary(),
@@ -1324,56 +1314,67 @@ def set_speed(name: str, value: float = DEFAULT_MOVE_SPEED_STEPS, unit: str = "s
     )
 
 
-def roll_initiative(participants: Optional[List[str]] = None):
-    names = list(participants or list(WORLD.characters.keys()))
-    # Remove any downed participants up-front so turns never start on a dead unit
-    names = [n for n in names if _is_alive(n)]
-    import random as _rand
+def compute_action_order(participants: Optional[List[str]] = None, policy: str = "dex") -> ToolResponse:
+    """Compute an action order without mutating WORLD state.
+
+    - Default policy 'dex': order by CoC DEX descending; tie-breaker by name.
+    - Filters out dead actors to avoid unusable turns.
+    - Returns ToolResponse(metadata={"ok", "order", "scores", "policy"}).
+    """
+    # Determine input names
+    if participants is None:
+        base: List[str] = (
+            list(WORLD.participants)
+            if WORLD.participants
+            else list(WORLD.characters.keys())
+        )
+    else:
+        base = list(participants)
+    names = [n for n in base if _is_alive(n)]
+
     scores: Dict[str, int] = {}
-    for nm in names:
-        scores[nm] = _coc_dex_of(nm)
-    # sort desc by DEX; tiebreaker by random then name
-    ordered = sorted(names, key=lambda n: (scores.get(n, 0), _rand.random(), str(n)), reverse=True)
-    WORLD.initiative_scores = scores
-    WORLD.initiative_order = ordered
-    WORLD.round = 1
-    WORLD.turn_idx = 0
-    WORLD.in_combat = True
-    WORLD._touch()
-    # reset tokens for first actor (if any)
-    first = _current_actor_name()
-    if first:
-        _reset_turn_tokens_for(first)
-    txt = "先攻：" + ", ".join(f"{n}({scores[n]})" for n in ordered)
-    return ToolResponse(content=[TextBlock(type="text", text=txt)], metadata={"ok": True, "initiative": ordered, "scores": scores})
+    if str(policy).lower() == "dex":
+        for nm in names:
+            scores[nm] = _coc_dex_of(nm)
+        # Deterministic: sort by (DEX desc, name asc)
+        ordered = sorted(names, key=lambda n: (scores.get(n, 0), str(n)), reverse=True)
+    else:
+        # Unknown policy -> fallback to name order
+        for nm in names:
+            scores[nm] = 0
+        ordered = sorted(names)
+
+    txt = "顺序：" + ", ".join(f"{n}({scores.get(n, 0)})" for n in ordered)
+    return ToolResponse(
+        content=[TextBlock(type="text", text=txt)],
+        metadata={"ok": True, "order": ordered, "scores": scores, "policy": str(policy)},
+    )
+
+
+def roll_initiative(participants: Optional[List[str]] = None):
+    """Compatibility wrapper: compute initiative order without side effects.
+
+    Previous behavior mutated WORLD to enter combat and reset tokens. This
+    implementation is intentionally side-effect-free and only returns the
+    calculated order and scores.
+    """
+    res = compute_action_order(participants=participants, policy="dex")
+    # Align metadata keys with historical callers (initiative -> order)
+    meta = dict(res.metadata or {})
+    ordered = list(meta.get("order") or [])
+    scores = dict(meta.get("scores") or {})
+    txt = "先攻：" + ", ".join(f"{n}({scores.get(n, 0)})" for n in ordered)
+    return ToolResponse(
+        content=[TextBlock(type="text", text=txt)],
+        metadata={"ok": True, "initiative": ordered, "scores": scores, "policy": meta.get("policy", "dex")},
+    )
 
 
 
-def end_combat():
-    WORLD.in_combat = False
-    WORLD.initiative_order.clear()
-    WORLD.initiative_scores.clear()
-    WORLD.turn_state.clear()
-    WORLD.cover.clear()
-    WORLD.conditions.clear()
-    WORLD.triggers.clear()
-    WORLD._touch()
-    return ToolResponse(content=[TextBlock(type="text", text="战斗结束")], metadata={"ok": True, "in_combat": False})
+## end_combat removed: world does not own combat lifecycle
 
 
-def _current_actor_name() -> Optional[str]:
-    try:
-        if not WORLD.in_combat:
-            return None
-        order = WORLD.initiative_order
-        if not order:
-            return None
-        idx = int(WORLD.turn_idx)
-        if idx < 0 or idx >= len(order):
-            return None
-        return order[idx]
-    except Exception:
-        return None
+ # World no longer tracks current-actor pointer; orchestrator owns scheduling
 
 
 def _is_alive(name: Optional[str]) -> bool:
@@ -1418,62 +1419,10 @@ def _reset_turn_tokens_for(name: Optional[str]):
     # Note: legacy 'dodge' condition/token removed; no per-turn cleanup needed.
 
 
-def next_turn():
-    """Advance to the next alive actor and start their turn.
-
-    - Skips over any actors whose HP<=0.
-    - Increments round when wrapping from the end to the start.
-    - If no alive actors exist, preserves indices and reports accordingly.
-    """
-    if not WORLD.in_combat or not WORLD.initiative_order:
-        return ToolResponse(content=[TextBlock(type="text", text="未处于战斗中")], metadata={"ok": False, "error_type": "not_in_combat", "in_combat": False})
-
-    order = WORLD.initiative_order
-    if not order:
-        return ToolResponse(content=[TextBlock(type="text", text="未处于战斗中")], metadata={"ok": False, "error_type": "not_in_combat", "in_combat": False})
-
-    prev_idx = int(WORLD.turn_idx)
-    n = len(order)
-
-    # Search for the next alive actor within one full cycle
-    chosen_idx: Optional[int] = None
-    wrapped = False
-    for step in range(1, n + 1):
-        idx = (prev_idx + step) % n
-        if idx <= prev_idx:
-            wrapped = True
-        cand = order[idx]
-        if _is_alive(cand):
-            chosen_idx = idx
-            break
-
-    if chosen_idx is None:
-        # No alive participants; nothing to do
-        note = TextBlock(type="text", text="[系统] 无可行动单位（全部倒地或未登记）")
-        return ToolResponse(content=[note], metadata={"round": WORLD.round, "actor": None, "ok": False, "error_type": "no_actor_available"})
-
-    WORLD.turn_idx = chosen_idx
-    if wrapped:
-        WORLD.round += 1
-
-    cur = order[WORLD.turn_idx]
-    _reset_turn_tokens_for(cur)
-    WORLD._touch()
-    return ToolResponse(
-        content=[TextBlock(type="text", text=f"回合推进：R{WORLD.round} 轮到 {cur}")],
-        metadata={"ok": True, "round": WORLD.round, "actor": cur},
-    )
+## next_turn removed: orchestrator schedules actors
 
 
-def get_turn() -> ToolResponse:
-    return ToolResponse(content=[TextBlock(type="text", text=f"当前：R{WORLD.round} idx={WORLD.turn_idx} actor={_current_actor_name() or '(未定)'}")], metadata={
-        "ok": True,
-        "round": WORLD.round,
-        "turn_idx": WORLD.turn_idx,
-        "actor": _current_actor_name(),
-        "order": list(WORLD.initiative_order),
-        "state": dict(WORLD.turn_state.get(_current_actor_name() or "", {})),
-    })
+## get_turn removed: orchestrator owns turn context
 
 
 def reset_actor_turn(name: str) -> ToolResponse:
