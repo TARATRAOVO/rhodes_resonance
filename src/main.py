@@ -88,7 +88,7 @@ DEFAULT_RECAP_MSG_LIMIT = 6
 DEFAULT_RECAP_ACTION_LIMIT = 6
 
 # System prompt building (tools list + templates)
-DEFAULT_TOOLS_TEXT = "perform_attack(), cast_arts(), advance_position(), set_relation(), transfer_item(), set_protection(), clear_protection(), first_aid()"
+DEFAULT_TOOLS_TEXT = "perform_attack(), cast_arts(), advance_position(), use_entrance(), set_relation(), transfer_item(), set_protection(), clear_protection(), first_aid()"
 
 # Enforce JSON-only replies mode. When enabled, agents must output exactly one
 # JSON object with the shape: {"speech": str, "actions": [{"tool": str, "args": dict}, ...]}.
@@ -116,16 +116,17 @@ DEFAULT_PROMPT_JSON_INSTRUCTIONS = (
     "- speech：1-2句中文对白；禁止括号旁白/系统提示；可留空（例如只行动）。\n"
     "- description：1-2句中文，用于合并表达想法/微动作/简短旁白。\n"
     "- actions：如无行动则为 []。如需行动，每个元素：\n"
-    "  * tool 取自：perform_attack, cast_arts, advance_position, set_relation, transfer_item, set_protection, clear_protection, first_aid；\n"
+    "  * tool 取自：perform_attack, cast_arts, advance_position, use_entrance, set_relation, transfer_item, set_protection, clear_protection, first_aid；\n"
     "  * args 为严格 JSON（双引号）；必须包含简短 reason(≤30字)；\n"
     "  * 行动默认为由你自己执行，只需要选择目标（统一使用 target 字段），例如攻击/施法的目标、守护的被保护者等。\\n"
+    "- 若要使用 use_entrance，请将 args.entrance 填为环境概要“入口”段落中显示的入口名称（如：\"仓棚南门\"）\n"
     "- 硬规则：只能对 reach_preview 中的可及目标使用 perform_attack；不满足触及时应先 advance_position。\n"
 )
 
 DEFAULT_PROMPT_JSON_EXAMPLE = (
     "输出示例（仅供你参考，不要输出这段文字）：\n"
     # Escape braces so this example survives str.format
-    '{{\"speech\": [\"阿米娅：小心前方。\"], \"description\": [\"她压低身形，向前探查。\", \"不能让他们受伤。\"], \"actions\": [{{\"tool\": \"advance_position\", \"args\": {{\"target\": [1,1], \"reason\": \"靠近掩体\"}}}}]}}'
+    '{{\"speech\": [\"我去广场。\"], \"description\": [\"她朝南侧门口快步靠近。\"], \"actions\": [{{\"tool\": \"use_entrance\", \"args\": {{\"entrance\": \"仓棚南门\", \"reason\": \"进入广场\"}}}}]}}'
 )
 
 DEFAULT_PROMPT_JSON_TEMPLATE = (
@@ -134,25 +135,15 @@ DEFAULT_PROMPT_JSON_TEMPLATE = (
     + DEFAULT_PROMPT_JSON_EXAMPLE
 )
 
-# World summary templates (rendered text; not called "系统提示"避免联想)
-WORLD_SUMMARY_HEADER = (
-    "现在：地点 {location}；时间 {hh:02d}:{mm:02d}；天气 {weather}"
-)
-WORLD_SUMMARY_DETAILS = "环境细节：{details}"
-WORLD_SUMMARY_OBJECTIVES = "目标：{objectives}"
-WORLD_SUMMARY_POSITIONS = "坐标：{positions}"
-WORLD_SUMMARY_CHARACTERS = "角色：{chars}"
+# 说明：环境概要的渲染已下沉到 world.render_env_for；此处不再维护世界概要模板常量。
 
 # Recap
 RECAP_TITLE = "回顾"
 RECAP_SECTION_RECENT = "刚才...："
 RECAP_CLIP_CHARS = 160
 
-# Reach preview & hard rule line
+# Reach rule line（保留用于“私人提示”区块）
 REACH_RULE_LINE = "作战规则：只能对reach_preview的“可及目标”使用 perform_attack。"
-REACH_LABEL_ADJ = "相邻（≤1步）{tail}："
-REACH_LABEL_TARGETS = "可及武器（{weapon}，触及 {steps}步）可用目标："
-REACH_LABEL_ARTS = "可及术式（{art}，触及 {steps}步）可用目标："
 
 # Player/private tips
 PLAYER_CTRL_TITLE = "玩家控制提示（仅你可见）：" 
@@ -481,6 +472,33 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         )
         return resp
 
+    def use_entrance(*, entrance: str = "", reason: str = "", name: str = ""):
+        """Use a scene entrance to switch scenes (implicit actor injected upstream).
+
+        The world layer handles approaching the entrance (movement) and switching on arrival.
+        """
+        fn = _VALIDATED.get("use_entrance") or (lambda **p: world.use_entrance(**p))
+        # Inject implicit actor if provided by orchestrator
+        kwargs: Dict[str, Any] = {}
+        if name:
+            kwargs["name"] = name
+        if entrance:
+            kwargs["entrance"] = entrance
+        resp = fn(**kwargs)
+        meta = resp.metadata or {}
+        reason_text = str(reason).strip() or "未提供"
+        try:
+            resp.content = list(getattr(resp, "content", []) or [])
+            resp.content.append({"type": "text", "text": f"理由：{reason_text}"})
+            meta["call_reason"] = reason_text
+            resp.metadata = meta
+        except Exception:
+            pass
+        _log_action(
+            f"use_entrance entrance={kwargs.get('entrance')} status={meta.get('status')} reason={reason_text}"
+        )
+        return resp
+
     def set_relation(a, b, value, reason: str = ""):
         # kept world API: world.set_relation, validated entry is still named 'adjust_relation' at world-level
         fn = _VALIDATED.get("adjust_relation") or (lambda **p: world.set_relation(**p))
@@ -587,6 +605,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         perform_attack,
         cast_arts,
         advance_position,
+        use_entrance,
         set_relation,
         transfer_item,
         set_protection,
@@ -597,6 +616,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         "perform_attack": perform_attack,
         "cast_arts": cast_arts,
         "advance_position": advance_position,
+        "use_entrance": use_entrance,
         "set_relation": set_relation,
         # Back-compat: keep old name mapped to the same function (not advertised)
         "adjust_relation": set_relation,
@@ -948,16 +968,23 @@ class _WorldPort:
     get_distance_steps_between = staticmethod(world_impl.get_distance_steps_between)
     # initiative/order helpers (side-effect-free)
     compute_action_order = staticmethod(world_impl.compute_action_order)
+    # focused rotation (player-anchored, same-scene, DEX ordering)
+    rotation_for_focus = staticmethod(getattr(world_impl, "rotation_for_focus", lambda *a, **k: None))
     # engine-facing rule queries
     is_dead = staticmethod(world_impl.is_dead)
     hostiles_present = staticmethod(world_impl.hostiles_present)
     # participants and character meta helpers
     set_participants = staticmethod(world_impl.set_participants)
     set_character_meta = staticmethod(world_impl.set_character_meta)
+    # visibility/rendering helpers (scoped environment)
+    render_env_for = staticmethod(getattr(world_impl, "render_env_for", lambda *a, **k: None))
+    visible_snapshot_for = staticmethod(
+        getattr(world_impl, "visible_snapshot_for", lambda name=None, **kw: {})
+    )
+    render_reach_preview_for = staticmethod(
+        getattr(world_impl, "render_reach_preview_for", lambda *a, **k: None)
+    )
 
-    @staticmethod
-    def snapshot() -> Dict[str, Any]:
-        return world_impl.WORLD.snapshot()
 
     @staticmethod
     def runtime() -> Dict[str, Any]:
@@ -1258,6 +1285,9 @@ async def _execute_actions_from_json(
             p.setdefault("name", actor)
         elif t == "first_aid":
             p.setdefault("name", actor)
+        elif t == "use_entrance":
+            # Minimal entrance tool: implicit actor is injected here
+            p.setdefault("name", actor)
         elif t == "set_protection":
             p.setdefault("guardian", actor)
             if "protectee" not in p and "target" in p:
@@ -1401,6 +1431,11 @@ async def _execute_actions_from_json(
             role="assistant",
         )
         await bcast(ctx, hub, tool_msg, phase=phase)
+        # After each tool result, push a lightweight state update so frontends can refresh the map
+        try:
+            emit_turn_state(ctx)
+        except Exception:
+            pass
 
 
 def _parse_story_positions(raw: Any, target: Dict[str, Tuple[int, int]]) -> None:
@@ -1437,7 +1472,8 @@ class TurnContext:
 
 def relation_brief_for(world: Any, name: str) -> str:
     try:
-        rel_map = dict(world.snapshot().get("relations") or {})
+        snap = world.visible_snapshot_for(name, filter_to_scene=True)
+        rel_map = dict((snap.get("relations") or {}))
     except Exception:
         rel_map = {}
     if not rel_map:
@@ -1462,7 +1498,7 @@ def relation_brief_for(world: Any, name: str) -> str:
 
 def weapon_brief_for(world: Any, nm: str) -> str:
     try:
-        snap = world.snapshot()
+        snap = world.visible_snapshot_for(nm, filter_to_scene=True)
         wdefs = dict((snap.get("weapon_defs") or {}))
         bag = dict((snap.get("inventory") or {}).get(str(nm), {}) or {})
     except Exception:
@@ -1489,7 +1525,7 @@ def weapon_brief_for(world: Any, nm: str) -> str:
 def arts_brief_for(world: Any, nm: str) -> str:
     """Return a compact brief of arts known by nm with range and MP info."""
     try:
-        snap = world.snapshot()
+        snap = world.visible_snapshot_for(nm, filter_to_scene=True)
         ch = dict((snap.get("characters") or {}).get(str(nm), {}) or {})
         coc = dict(ch.get("coc") or {})
         known = list(coc.get("arts_known") or [])
@@ -1576,19 +1612,16 @@ def normalize_scene_cfg(sc: Optional[Mapping[str, Any]]):
 
 
 def apply_scene_to_world(world: Any, name, objectives, details, weather, time_min):
-    try:
-        snap0 = world.snapshot()
-        current_loc = str((snap0 or {}).get("location") or "")
-    except Exception:
-        current_loc = ""
-    world.set_scene(
-        name or current_loc,
-        objectives or None,
-        append=False,
-        details=details or None,
-        time_min=time_min,
-        weather=weather,
-    )
+    # Only set scene when an explicit location name is provided; avoid global snapshot fallback
+    if name:
+        world.set_scene(
+            name,
+            objectives or None,
+            append=False,
+            details=details or None,
+            time_min=time_min,
+            weather=weather,
+        )
 
 
 async def bcast(
@@ -1640,164 +1673,43 @@ def emit_turn_state(ctx: TurnContext) -> None:
         )
 
 
+def _first_player_name(world: Any) -> Optional[str]:
+    try:
+        rt = world.runtime()
+        chars = dict(rt.get("characters") or {})
+        for nm, st in chars.items():
+            try:
+                if str((st or {}).get("type", "npc")).lower() == "player":
+                    return str(nm)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
 def emit_world_state(ctx: TurnContext, turn_val: int) -> None:
-    snapshot = ctx.world.snapshot()
-    ctx.emit("state_update", phase="world", turn=turn_val, data={"state": snapshot})
+    # Broadcast a scene-filtered snapshot from the player's perspective
+    actor = _first_player_name(ctx.world)
+    try:
+        snap = ctx.world.visible_snapshot_for(actor or "", filter_to_scene=True)
+    except Exception:
+        snap = {}
+    ctx.emit("state_update", phase="world", turn=turn_val, data={"state": snap})
 
 
 # Removed: legacy dev-only context card writer. Prompt logs supersede it.
 
 
-def reach_preview_lines(world: Any, name: str) -> List[str]:
-    lines: List[str] = []
-    try:
-        def _fmt_steps(n: int) -> str:
-            try:
-                s = int(n)
-            except Exception:
-                s = 0
-            if s < 0:
-                s = 0
-            return f"{s}步"
-
-        snap = world.snapshot() or {}
-        # Ensure actor has a position recorded
-        pos_map = snap.get("positions") or {}
-        if str(name) not in (pos_map or {}):
-            return lines
-
-        # Build a quick lookup of my relations to others for inline labels in reach preview
-        # Only consider directed edges: me -> other. Keep this lightweight to control token cost.
-        rel_map: Dict[str, int] = {}
-        try:
-            rel = dict((snap.get("relations") or {}))
-            me = str(name)
-            for k, v in (rel or {}).items():
-                try:
-                    a, b = str(k).split("->", 1)
-                except Exception:
-                    continue
-                if a != me or b == me:
-                    continue
-                try:
-                    rel_map[str(b)] = int(v)
-                except Exception:
-                    # ignore malformed values
-                    pass
-        except Exception:
-            rel_map = {}
-
-        def _rel_cat(sc: Optional[int]) -> Optional[str]:
-            if sc is None:
-                return None
-            try:
-                return _relation_category(int(sc))
-            except Exception:
-                return None
-
-        def _fmt_with_rel(nm: str, steps: int) -> str:
-            """Append a compact relation tag to a reachable target.
-
-            Format: Name(3步; 敌对) — omits tag when no relation known.
-            Keep concise to reduce token footprint; do not include raw score by default.
-            """
-            tag = _rel_cat(rel_map.get(str(nm)))
-            if tag:
-                return f"{nm}({_fmt_steps(steps)}; {tag})"
-            return f"{nm}({_fmt_steps(steps)})"
-
-        # Adjacent units (≤1 步)
-        try:
-            adj = list(world.list_adjacent_units(name))
-        except Exception:
-            adj = []
-        if adj:
-            try:
-                react_avail = bool(world.reaction_available(name))
-            except Exception:
-                react_avail = True
-            tail = "（反应：可用）" if react_avail else "（反应：已用）"
-            parts = [_fmt_with_rel(nm, d) for nm, d in adj]
-            lines.append(REACH_LABEL_ADJ.format(tail=tail) + ", ".join(parts))
-
-        # Weapons: iterate inventory to show per-weapon可及目标
-        inv = (snap.get("inventory") or {}).get(str(name), {}) or {}
-        wdefs = (snap.get("weapon_defs") or {}) or {}
-        weapons: List[Tuple[str, int]] = []
-        for wid, cnt in inv.items():
-            try:
-                if int(cnt) <= 0:
-                    continue
-            except Exception:
-                continue
-            wid_str = str(wid)
-            if wid_str not in wdefs:
-                continue
-            try:
-                rsteps = int((wdefs[wid_str] or {}).get("reach_steps", 1))
-            except Exception:
-                rsteps = 1
-            weapons.append((wid_str, max(1, rsteps)))
-        weapons.sort(key=lambda t: (t[1], t[0]))
-        for wid, rsteps in weapons:
-            try:
-                items = list(world.reachable_targets_for_weapon(name, wid))
-            except Exception:
-                items = []
-            if not items:
-                continue
-            parts = [_fmt_with_rel(nm, d) for nm, d in items]
-            # id + optional desc (no label in display)
-            try:
-                desc = str((wdefs.get(wid) or {}).get("desc") or "")
-            except Exception:
-                desc = ""
-            wid_display = wid
-            label_line = REACH_LABEL_TARGETS.format(weapon=wid_display, steps=int(rsteps))
-            if desc:
-                # Split into two lines when description exists
-                head = label_line.replace("可用目标：", "")
-                lines.append(head + "：" + desc)
-                lines.append("可用目标：" + ", ".join(parts))
-            else:
-                lines.append(label_line + ", ".join(parts))
-
-        # Arts preview（已知术式，按射程筛选，不考虑 LOS）
-        try:
-            ch = dict((snap.get("characters") or {}).get(str(name), {}) or {})
-            known = list((ch.get("coc") or {}).get("arts_known") or [])
-            arts_defs = world.get_arts_defs() if hasattr(world, "get_arts_defs") else {}
-            for aid in known:
-                a = (arts_defs or {}).get(str(aid)) or {}
-                rsteps = int(a.get("range_steps", 6) or 6)
-                try:
-                    items = list(world.reachable_targets_for_art(name, str(aid)))
-                except Exception:
-                    items = []
-                if not items:
-                    continue
-                parts = [_fmt_with_rel(nm, d) for nm, d in items]
-                desc = str((a or {}).get("desc") or "")
-                aid_display = str(aid)
-                label_line = REACH_LABEL_ARTS.format(art=aid_display, steps=int(rsteps))
-                if desc:
-                    head = label_line.replace("可用目标：", "")
-                    lines.append(head + "：" + desc)
-                    lines.append("可用目标：" + ", ".join(parts))
-                else:
-                    lines.append(label_line + ", ".join(parts))
-        except Exception:
-            pass
-    except Exception:
-        return []
-    return lines
+## Reach 预览渲染已下沉到 world.render_reach_preview_for
 
 
 def make_ephemeral_agent(
     ctx: TurnContext, name: str, private_section: Optional[str]
 ) -> ReActAgent:
     try:
-        sheet_now = (ctx.world.snapshot().get("characters") or {}).get(name, {}) or {}
+        snap = ctx.world.visible_snapshot_for(name, filter_to_scene=True)
+        sheet_now = (snap.get("characters") or {}).get(name, {}) or {}
         persona_now = sheet_now.get("persona") or ""
         appearance_now = sheet_now.get("appearance")
         quotes_now = sheet_now.get("quotes")
@@ -1876,9 +1788,26 @@ async def npc_ephemeral_say(
             tk = str(token).strip().lower()
             if tk == "env" and CTX_INJECT_ENV_SUMMARY:
                 try:
-                    env_text = _world_summary_text(ctx.world.snapshot())
-                    await ephemeral.memory.add(Msg("Host", env_text, "assistant"))
-                    debug_items.append(("env", env_text))
+                    env_text = None
+                    # Prefer world-provided renderer if available (scoped by scene)
+                    try:
+                        if hasattr(ctx.world, "render_env_for"):
+                            resp = ctx.world.render_env_for(name, filter_to_scene=True)  # type: ignore[attr-defined]
+                            # Extract text blocks in order
+                            content = getattr(resp, "content", []) or []
+                            lines = []
+                            for blk in content:
+                                if isinstance(blk, dict):
+                                    lines.append(str(blk.get("text", "")))
+                                else:
+                                    # agentscope.TextBlock fallback compatibility
+                                    lines.append(str(getattr(blk, "text", "")))
+                            env_text = "\n".join([ln for ln in lines if ln]).strip()
+                    except Exception:
+                        env_text = None
+                    if env_text:
+                        await ephemeral.memory.add(Msg("Host", env_text, "assistant"))
+                        debug_items.append(("env", env_text))
                 except Exception:
                     pass
             elif tk == "recap" and CTX_INJECT_RECAP:
@@ -1890,10 +1819,18 @@ async def npc_ephemeral_say(
                     pass
             elif tk == "reach_preview" and CTX_INJECT_REACH_PREVIEW:
                 try:
-                    lines = reach_preview_lines(ctx.world, name)
-                    if lines:
-                        lines = [REACH_RULE_LINE] + lines
-                        text = "\n".join(lines)
+                    text = None
+                    if hasattr(ctx.world, "render_reach_preview_for"):
+                        _resp = ctx.world.render_reach_preview_for(name)  # type: ignore[attr-defined]
+                        _content = getattr(_resp, "content", []) or []
+                        _lines: List[str] = []
+                        for _blk in _content:
+                            if isinstance(_blk, dict):
+                                _lines.append(str(_blk.get("text", "")))
+                            else:
+                                _lines.append(str(getattr(_blk, "text", "")))
+                        text = "\n".join([ln for ln in _lines if ln]).strip()
+                    if text:
                         await ephemeral.memory.add(Msg("Host", text, "assistant"))
                         debug_items.append(("reach_preview", text))
                 except Exception:
@@ -2017,25 +1954,17 @@ async def run_demo(
     """Run the NPC talk demo (sequential group chat, no GM/adjudication)."""
 
     # System prompt assembly uses policy and world snapshot
-    # Ensure action order is computed by world (side-effect-free) and applied by main
+    # Initialise rotation by delegating to world (focus by player scene, DEX order)
     try:
-        if hasattr(world, "compute_action_order"):
-            _res = world.compute_action_order()
-            try:
-                _meta = getattr(_res, "metadata", {}) or {}
-                _order = list(_meta.get("order") or _meta.get("initiative") or [])
-            except Exception:
-                _order = []
-            if _order:
-                try:
-                    world.set_participants(_order)
-                except Exception:
-                    pass
+        if hasattr(world, "rotation_for_focus"):
+            world.rotation_for_focus(mutate=True)  # writes WORLD.participants deterministically
     except Exception:
         # Never fail run due to ordering issues
         pass
     # Build actors from WORLD snapshot
-    snap0 = world.snapshot()
+    # Build actors from the player's visible snapshot
+    p_actor = _first_player_name(world)
+    snap0 = world.visible_snapshot_for(p_actor or "", filter_to_scene=True)
     char_map = dict(snap0.get("characters") or {})
     actor_entries: Dict[str, dict] = {
         str(k): (v if isinstance(v, dict) else {}) for k, v in char_map.items()
@@ -2045,7 +1974,7 @@ async def run_demo(
         nm: str((entry or {}).get("type", "npc")).lower()
         for nm, entry in actor_entries.items()
     }
-    # Participants list from world; fallback to position keys if empty
+    # Participants list from world (set by rotation_for_focus); fallback to position keys if empty
     try:
         allowed_names_world: List[str] = list(snap0.get("participants") or [])
         if not allowed_names_world:
@@ -2053,34 +1982,11 @@ async def run_demo(
     except Exception:
         allowed_names_world = []
     allowed_names_str = ", ".join(allowed_names_world) if allowed_names_world else ""
+    # Initial focus/scene filtering handled by world.rotation_for_focus
+
     # Agent lists for hub: keep order of NPC participants only
     npcs_list: List[ReActAgent] = []
     participants_order: List[AgentBase] = []
-
-    def _relation_brief(name: str) -> str:
-        """Build relation brief from world state, not raw config."""
-        try:
-            rel_map = dict(world.snapshot().get("relations") or {})
-        except Exception:
-            rel_map = {}
-        if not rel_map:
-            return ""
-        me = str(name)
-        entries: List[str] = []
-        for key, raw in rel_map.items():
-            try:
-                a, b = key.split("->", 1)
-            except Exception:
-                continue
-            if a != me or b == me:
-                continue
-            try:
-                score = int(raw)
-            except Exception:
-                continue
-            label = _relation_category(score)
-            entries.append(f"{b}:{score:+d}（{label}）")
-        return "；".join(entries)
 
     # Tool list must be provided by caller (main). Keep empty default.
     tool_list = list(tool_fns) if tool_fns is not None else []
@@ -2098,7 +2004,8 @@ async def run_demo(
             # Build per-actor weapon brief for prompt
             def _weapon_brief_for(nm: str) -> str:
                 try:
-                    snap = world.snapshot()
+                    # Use scene-unscoped view to ensure inventory/weapon defs are available
+                    snap = world.visible_snapshot_for(nm, filter_to_scene=False)
                     wdefs = dict((snap.get("weapon_defs") or {}))
                     bag = dict((snap.get("inventory") or {}).get(str(nm), {}) or {})
                 except Exception:
@@ -2118,11 +2025,13 @@ async def run_demo(
 
             # Read meta from world (single source of truth)
             try:
-                sheet = (world.snapshot().get("characters") or {}).get(name, {}) or {}
+                # Prefer current view for this actor; scoped to actor's scene
+                sheet = (world.visible_snapshot_for(name, filter_to_scene=True).get("characters") or {}).get(name, {}) or {}
             except Exception:
                 sheet = {}
             persona = sheet.get("persona")
-            if not isinstance(persona, str) or not persona.strip():
+            is_player = (str(actor_types.get(name, "npc")) == "player")
+            if not is_player and (not isinstance(persona, str) or not persona.strip()):
                 raise ValueError(f"缺少角色人设(persona)：{name}")
             appearance = sheet.get("appearance")
             quotes = sheet.get("quotes")
@@ -2242,8 +2151,8 @@ async def run_demo(
     # Human-readable header for participants and starting positions
     _start_pos_lines = []
     try:
-        parts = list(world.snapshot().get("participants") or [])
-        pos_map = world.snapshot().get("positions") or {}
+        parts = list(snap0.get("participants") or [])
+        pos_map = snap0.get("positions") or {}
         for nm in parts:
             pos = pos_map.get(nm)
             if pos:
@@ -2253,8 +2162,8 @@ async def run_demo(
     _participants_header = (
         "参与者："
         + (
-            ", ".join(world.snapshot().get("participants") or [])
-            if (world.snapshot().get("participants") or [])
+            ", ".join(snap0.get("participants") or [])
+            if (snap0.get("participants") or [])
             else "(无)"
         )
         + (" | 初始坐标：" + "; ".join(_start_pos_lines) if _start_pos_lines else "")
@@ -2262,7 +2171,6 @@ async def run_demo(
 
     # Opening line is taken from scene details when present; main does not modify world if empty
     try:
-        snap0 = world.snapshot()
         details0 = list((snap0 or {}).get("scene_details") or [])
         opening_line = details0[0] if details0 else ""
     except Exception:
@@ -2274,7 +2182,8 @@ async def run_demo(
     # 若无参与者（按 positions 推断）则在进入 Hub 前直接记录并结束
     if not allowed_names_world:
         try:
-            _emit("state_update", phase="initial", data={"state": world.snapshot()})
+            p_actor = _first_player_name(world)
+            _emit("state_update", phase="initial", data={"state": world.visible_snapshot_for(p_actor or "", filter_to_scene=True)})
         except Exception:
             pass
         try:
@@ -2286,14 +2195,19 @@ async def run_demo(
         except Exception:
             pass
         try:
-            _emit("state_update", phase="final", data={"state": world.snapshot()})
+            p_actor = _first_player_name(world)
+            _emit("state_update", phase="final", data={"state": world.visible_snapshot_for(p_actor or "", filter_to_scene=True)})
         except Exception:
             pass
         return
 
     # 在进入 Hub 和任何 NPC 开口之前，先广播一次完整快照，确保前端尽快拿到带坐标的状态
     try:
-        _emit("state_update", phase="initial", data={"state": world.snapshot()})
+        try:
+            p_actor = _first_player_name(world)
+            _emit("state_update", phase="initial", data={"state": world.visible_snapshot_for(p_actor or "", filter_to_scene=True)})
+        except Exception:
+            pass
     except Exception:
         pass
     # 无论入口是否走过 main()/server 的载表路径，这里追加一次术式表遥测，方便排查
@@ -2330,12 +2244,17 @@ async def run_demo(
                     pass
         except Exception:
             pass
-        _emit("state_update", phase="initial", data={"state": world.snapshot()})
+        try:
+            p_actor = _first_player_name(world)
+            _emit("state_update", phase="initial", data={"state": world.visible_snapshot_for(p_actor or "", filter_to_scene=True)})
+        except Exception:
+            pass
         round_idx = 1
         max_rounds = None
 
         def _objectives_resolved() -> bool:
-            snap = world.snapshot()
+            # Use an unscoped view to evaluate global objectives
+            snap = world.visible_snapshot_for(None, filter_to_scene=False)
             objs = list(snap.get("objectives") or [])
             if not objs:
                 return False
@@ -2347,24 +2266,22 @@ async def run_demo(
             return True
 
         end_reason: Optional[str] = None
-        # Default to original semantics: end when no hostiles (fixed behaviour)
-        require_hostiles = True
+        # Default updated: do NOT end the run just because no hostiles remain.
+        # This disables the "场上已无敌对存活单位" hard end-condition and lets the
+        # loop continue until other criteria (e.g., objectives/max rounds) trigger.
+        require_hostiles = False
 
         while True:
             try:
-                # Dynamic reordering at the start of each round (DEX by default)
+                # Refresh rotation at start of round (focus-by-player + DEX order)
                 try:
-                    if hasattr(world, "compute_action_order"):
-                        _res = world.compute_action_order(allowed_names_world)
-                        _meta = getattr(_res, "metadata", {}) or {}
-                        _order = list(_meta.get("order") or _meta.get("initiative") or [])
-                        if _order:
-                            try:
-                                world.set_participants(_order)
-                            except Exception:
-                                pass
-                            # Update local iteration order to reflect world decision
-                            allowed_names_world = list(_order)
+                    if hasattr(world, "rotation_for_focus"):
+                        world.rotation_for_focus(mutate=True)
+                        # Update local iteration order to reflect world decision (scene-scoped)
+                        p_actor2 = _first_player_name(world)
+                        allowed_names_world = list(
+                            (world.visible_snapshot_for(p_actor2 or "", filter_to_scene=True).get("participants") or [])
+                        )
                 except Exception:
                     pass
 
@@ -2448,16 +2365,28 @@ async def run_demo(
                     # so each turn gets "世界概要 + 行动记忆 + 指导 prompt" together.
                     if CTX_BROADCAST_CONTEXT_TO_OBSERVERS:
                         try:
-                            await bcast(
-                                ctx,
-                                hub,
-                                Msg(
-                                    "Host",
-                                    _world_summary_text(world.snapshot()),
-                                    "assistant",
-                                ),
-                                phase="context:world",
-                            )
+                            # Prefer world-scoped environment text for current actor's scene
+                            env_text_bcast = None
+                            try:
+                                if hasattr(world, "render_env_for"):
+                                    _resp = world.render_env_for(name, filter_to_scene=True)  # type: ignore[attr-defined]
+                                    _content = getattr(_resp, "content", []) or []
+                                    _lines: List[str] = []
+                                    for _blk in _content:
+                                        if isinstance(_blk, dict):
+                                            _lines.append(str(_blk.get("text", "")))
+                                        else:
+                                            _lines.append(str(getattr(_blk, "text", "")))
+                                    env_text_bcast = "\n".join([ln for ln in _lines if ln]).strip()
+                            except Exception:
+                                env_text_bcast = None
+                            if env_text_bcast:
+                                await bcast(
+                                    ctx,
+                                    hub,
+                                    Msg("Host", env_text_bcast, "assistant"),
+                                    phase="context:world",
+                                )
                         except Exception as exc:
                             # 记录世界概要渲染/广播失败，不中断回合
                             _emit(
@@ -2480,7 +2409,7 @@ async def run_demo(
                 # 1) Compute per-turn private section for this actor（回合资源 + 状态提示）
                 private_section = None
                 try:
-                    snap_now = world.snapshot()
+                    snap_now = world.visible_snapshot_for(name, filter_to_scene=True)
                     ch = (snap_now.get("characters") or {}).get(name, {}) or {}
                     ts_all = world.runtime().get("turn_state", {}) or {}
                     ts = ts_all.get(name, {}) or {}
@@ -2575,9 +2504,7 @@ async def run_demo(
                         positions = dict((snap_now.get("positions") or {}))
                         # 候选单位：优先 participants；否则使用所有已登记坐标的单位
                         try:
-                            participants_now = list(
-                                world.snapshot().get("participants") or []
-                            )
+                            participants_now = list((snap_now.get("participants") or []))
                         except Exception:
                             participants_now = []
                         candidates = [
@@ -2693,6 +2620,11 @@ async def run_demo(
                         end_reason = "场上已无敌对存活单位"
                         combat_cleared = True
                         break
+                # Push a lightweight positions update at actor turn end as an extra safety net
+                try:
+                    emit_turn_state(ctx)
+                except Exception:
+                    pass
                 _emit(
                     "turn_end",
                     actor=name,
@@ -2728,7 +2660,11 @@ async def run_demo(
                 end_reason = f"已达到最大回合 {max_rounds}"
                 break
 
-        final_snapshot = world.snapshot()
+        try:
+            p_actor = _first_player_name(world)
+            final_snapshot = world.visible_snapshot_for(p_actor or "", filter_to_scene=True)
+        except Exception:
+            final_snapshot = {}
         _emit("state_update", phase="final", data={"state": final_snapshot})
         await bcast(
             ctx,
@@ -2742,77 +2678,7 @@ async def run_demo(
         )
 
 
-def _world_summary_text(snap: dict) -> str:
-    try:
-        t = int(snap.get("time_min", 0))
-    except Exception:
-        t = 0
-    hh, mm = t // 60, t % 60
-    weather = snap.get("weather", "unknown")
-    location = snap.get("location", "未知")
-    objectives = snap.get("objectives", []) or []
-    obj_status = snap.get("objective_status", {}) or {}
-    # Note: 为避免角色获悉他人物品，世界概要中不再包含任何“物品”信息
-    positions = snap.get("positions", {}) or {}
-    pos_lines = []
-    try:
-        for nm, coord in positions.items():
-            if isinstance(coord, (list, tuple)) and len(coord) >= 2:
-                pos_lines.append(f"{nm}({coord[0]}, {coord[1]})")
-    except Exception:
-        pos_lines = []
-    chars = snap.get("characters", {}) or {}
-    char_lines = []
-    try:
-        for nm, st in chars.items():
-            hp = st.get("hp")
-            max_hp = st.get("max_hp")
-            if hp is not None and max_hp is not None:
-                extra = ""
-                # Append dying turns-left or death marker if applicable
-                try:
-                    dt = st.get("dying_turns_left", None)
-                    if dt is not None:
-                        extra = f"（濒死{int(dt)}）"
-                    elif int(hp) <= 0:
-                        extra = "（死亡）"
-                except Exception:
-                    extra = extra
-                char_lines.append(f"{nm}(HP {hp}/{max_hp}){extra}")
-    except Exception:
-        pass
-
-    details = [
-        d for d in (snap.get("scene_details") or []) if isinstance(d, str) and d.strip()
-    ]
-    lines = [
-        WORLD_SUMMARY_HEADER.format(location=location, hh=hh, mm=mm, weather=weather),
-        WORLD_SUMMARY_OBJECTIVES.format(
-            objectives=(
-                "; ".join(
-                    (
-                        f"{str(o)}({obj_status.get(str(o))})"
-                        if obj_status.get(str(o))
-                        else str(o)
-                    )
-                    for o in objectives
-                )
-                if objectives
-                else "无"
-            )
-        ),
-        # 说明：避免使用“系统提示”措辞以免模型联想出系统旁白；且不显示任何物品信息
-        WORLD_SUMMARY_POSITIONS.format(
-            positions=("; ".join(pos_lines) if pos_lines else "未记录")
-        ),
-        WORLD_SUMMARY_CHARACTERS.format(
-            chars=("; ".join(char_lines) if char_lines else "未登记")
-        ),
-    ]
-    if details:
-        # Insert details after the header line
-        lines.insert(1, WORLD_SUMMARY_DETAILS.format(details="；".join(details)))
-    return "\n".join(lines)
+## 旧版世界概要渲染已移除；统一使用 world.render_env_for
 
 
 def _bootstrap_runtime(
@@ -3223,7 +3089,8 @@ async def _start_game_server_mode(
             except Exception:
                 pass
             try:
-                _STATE.last_snapshot = world.snapshot()
+                p_actor = _first_player_name(world)
+                _STATE.last_snapshot = world.visible_snapshot_for(p_actor or "", filter_to_scene=True)
             except Exception:
                 _STATE.last_snapshot = {}
             # Clean prompt dumps at session start; keep only latest per actor during run
@@ -3409,7 +3276,8 @@ async def _start_game_for(
             except Exception:
                 pass
             try:
-                state.last_snapshot = world.snapshot()
+                p_actor = _first_player_name(world)
+                state.last_snapshot = world.visible_snapshot_for(p_actor or "", filter_to_scene=True)
             except Exception:
                 state.last_snapshot = {}
 
@@ -3793,6 +3661,12 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
             )
         st = _get_session(_parse_sid_from(request))
         st.selected_story_id = sid
+        # Eagerly switch WORLD for preview/visible endpoints when not running
+        try:
+            if not st.is_running():
+                world_impl.select_world(sid)
+        except Exception:
+            pass
         return {"ok": True, "selected": sid}
 
     @app.get("/api/preview_state")
@@ -3832,6 +3706,46 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
             return JSONResponse(
                 {"ok": False, "message": f"preview failed: {exc}"}, status_code=500
             )
+
+    @app.get("/api/visible_state")
+    async def api_visible_state(actor: Optional[str] = None):  # type: ignore[no-redef]
+        """Return a scene-filtered snapshot for an actor's current scene.
+
+        Query: ?actor=Name (optional). If omitted, pick the first player if available; else None
+        (which falls back to the global snapshot in world layer).
+        """
+        try:
+            name = str(actor or "").strip()
+        except Exception:
+            name = ""
+        # Resolve default actor as the first player character if not provided
+        if not name:
+            try:
+                ch = dict((world_impl.WORLD.characters or {}))  # type: ignore[attr-defined]
+                for nm, st in ch.items():
+                    try:
+                        if str((st or {}).get("type", "npc")).lower() == "player":
+                            name = str(nm)
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                name = ""
+        try:
+            snap = (
+                world_impl.visible_snapshot_for(name or None, filter_to_scene=True)  # type: ignore[attr-defined]
+                if hasattr(world_impl, "visible_snapshot_for")
+                else {
+                    "positions": dict(getattr(world_impl.WORLD, "positions", {}) or {}),
+                    "characters": dict(getattr(world_impl.WORLD, "characters", {}) or {}),
+                    "participants": list(getattr(world_impl.WORLD, "participants", []) or []),
+                    "scene_of": dict(getattr(world_impl.WORLD, "scene_of", {}) or {}),
+                    "location": getattr(world_impl.WORLD, "location", ""),
+                }
+            )
+            return {"ok": True, "actor": name or None, "state": snap}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "message": f"visible failed: {exc}"}, status_code=500)
 
     @app.post("/api/start")
     async def api_start(payload: dict | None = None, request: Request = None):  # type: ignore[no-redef]

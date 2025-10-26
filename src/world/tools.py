@@ -209,6 +209,11 @@ class World:
     participants: List[str] = field(default_factory=list)
     # Protection links: protectee -> ordered list of guardians
     guardians: Dict[str, List[str]] = field(default_factory=dict)
+    # --- Multi-scene (entrances) minimal support ---
+    # Scenes registry and per-actor scene membership
+    scenes: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    entrances: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    scene_of: Dict[str, str] = field(default_factory=dict)
 
     def _touch(self) -> None:
         try:
@@ -217,60 +222,11 @@ class World:
             # be defensive; never fail mutators due to versioning
             self.version = int(self.version or 0) + 1
 
-    def snapshot(self) -> dict:
-        # Build a sanitized weapon-def summary for consumers (id -> selected fields)
-        def _weapon_summary():
-            out: Dict[str, Dict[str, Any]] = {}
-            for wid, data in (self.weapon_defs or {}).items():
-                try:
-                    d = dict(data or {})
-                except Exception:
-                    d = {}
-                try:
-                    rs = int(d.get("reach_steps", DEFAULT_REACH_STEPS))
-                except Exception:
-                    rs = int(DEFAULT_REACH_STEPS)
-                out[str(wid)] = {
-                    "label": str(d.get("label", "")),
-                    "desc": str(d.get("desc") or d.get("description", "")),
-                    "reach_steps": max(1, rs),
-                    "skill": str(d.get("skill", "")),
-                    "defense_skill": str(d.get("defense_skill", "")),
-                    "damage": str(d.get("damage", "")),
-                    "damage_type": str(d.get("damage_type", "physical")),
-                }
-            return out
-
-        return {
-            "version": int(self.version),
-            "time_min": self.time_min,
-            "weather": self.weather,
-            "relations": {f"{a}->{b}": v for (a, b), v in self.relations.items()},
-            "inventory": self.inventory,
-            "characters": self.characters,
-            "positions": {k: list(v) for k, v in self.positions.items()},
-            "objective_positions": {k: list(v) for k, v in self.objective_positions.items()},
-            # removed hidden_enemies entirely per design (no implicit enemies)
-            "location": self.location,
-            "objectives": list(self.objectives),
-            "scene_details": list(self.scene_details),
-            "objective_status": dict(self.objective_status),
-            "objective_notes": dict(self.objective_notes),
-            "tension": int(self.tension),
-            "marks": list(self.marks),
-            "participants": list(self.participants),
-            "guardians": {k: list(v) for k, v in self.guardians.items()},
-            # combat snapshot removed: world no longer exposes round/initiative/in_combat at the API level
-            # per-turn resource state remains accessible via runtime() for orchestrator only
-            # Weapon data
-            "weapons": sorted(list(self.weapon_defs.keys())),
-            "weapon_defs": _weapon_summary(),
-            # Arts data (for diagnostics; full details are available via get_arts_defs())
-            "arts": sorted(list(self.arts_defs.keys())),
-        }
+    # snapshot() removed by design. Only use visible_snapshot_for(name, filter_to_scene=True).
 
 
 WORLD = World()
+
 
 # --- tools ---
 
@@ -457,7 +413,52 @@ def init_world_from_configs(*, selected_story_id: Optional[str] = None, reset: b
                     set_relation(str(src), str(dst), score, reason="配置设定")
                 except Exception:
                     pass
-    # Scene from story
+    # Scenes/Entrances (optional, minimal)
+    try:
+        sc_map = story.get("scenes") if isinstance(story, dict) else None
+        if isinstance(sc_map, dict):
+            WORLD.scenes = {str(k): dict(v or {}) for k, v in sc_map.items()}
+    except Exception:
+        pass
+    try:
+        ent_map = story.get("entrances") if isinstance(story, dict) else None
+        if isinstance(ent_map, dict):
+            WORLD.entrances = {str(k): dict(v or {}) for k, v in ent_map.items()}
+    except Exception:
+        pass
+    try:
+        init_scenes = story.get("initial_scenes") if isinstance(story, dict) else None
+        if isinstance(init_scenes, dict):
+            for nm, sc in init_scenes.items():
+                if isinstance(sc, str) and sc.strip():
+                    WORLD.scene_of[str(nm)] = sc.strip()
+    except Exception:
+        pass
+    try:
+        sp = story.get("scene_positions") if isinstance(story, dict) else None
+        if isinstance(sp, dict):
+            for scid, mp in sp.items():
+                if not isinstance(mp, dict):
+                    continue
+                for nm, v in mp.items():
+                    if isinstance(v, (list, tuple)) and len(v) >= 2:
+                        try:
+                            x, y = int(v[0]), int(v[1])
+                        except Exception:
+                            continue
+                        try:
+                            set_position(str(nm), x, y)
+                        except Exception:
+                            pass
+                        # If actor has no scene set yet, inherit this scene id
+                        try:
+                            WORLD.scene_of.setdefault(str(nm), str(scid))
+                        except Exception:
+                            pass
+    except Exception:
+        pass
+
+    # Scene from story (legacy single-scene header)
     sc = story.get("scene") if isinstance(story, dict) else None
     name, obj, det, weather, time_min = _normalize_scene_cfg(sc if isinstance(sc, dict) else None)
     if any([name, obj, det, weather, time_min is not None]):
@@ -472,7 +473,156 @@ def init_world_from_configs(*, selected_story_id: Optional[str] = None, reset: b
             )
         except Exception:
             pass
-    return WORLD.snapshot()
+    # Do not expose a global snapshot; return minimal ack
+    return {"ok": True}
+
+# ---- Scene/Entrance helpers (minimal) ----
+
+def set_scenes(defs: Dict[str, Dict[str, Any]]) -> ToolResponse:
+    WORLD.scenes = {str(k): dict(v or {}) for k, v in (defs or {}).items()}
+    WORLD._touch()
+    return ToolResponse(content=[TextBlock(type="text", text=f"载入场景：{len(WORLD.scenes)} 项")], metadata={"ok": True, "count": len(WORLD.scenes)})
+
+
+def set_entrances(defs: Dict[str, Dict[str, Any]]) -> ToolResponse:
+    WORLD.entrances = {str(k): dict(v or {}) for k, v in (defs or {}).items()}
+    WORLD._touch()
+    return ToolResponse(content=[TextBlock(type="text", text=f"载入入口：{len(WORLD.entrances)} 项")], metadata={"ok": True, "count": len(WORLD.entrances)})
+
+
+def _actor_scene(name: str) -> Optional[str]:
+    s = WORLD.scene_of.get(str(name))
+    if isinstance(s, str) and s:
+        return s
+    return None
+
+
+def _scene_name(scene_id: str) -> str:
+    sc = WORLD.scenes.get(str(scene_id), {}) if WORLD.scenes else {}
+    return str(sc.get("name", scene_id))
+
+
+def use_entrance(
+    name: str,
+    *,
+    entrance: Optional[str] = None,
+    reason: str = "",
+) -> ToolResponse:
+    """Use an entrance to change scene. Minimal behavior:
+
+    - If not at the entrance tile, move towards it using remaining movement for this turn.
+    - If after movement the actor is at the entrance tile, switch scene and place at spawn.
+    - No door locks/hidden handling; choose by `entrance` id/label or by `to` scene.
+    """
+    nm = str(name)
+    cur_scene = _actor_scene(nm)
+    if not cur_scene:
+        # Fallback: infer from WORLD.location when not set
+        try:
+            for sid, cfg in (WORLD.scenes or {}).items():
+                if str(cfg.get("name", "")) == str(WORLD.location):
+                    cur_scene = str(sid)
+                    WORLD.scene_of[nm] = cur_scene
+                    break
+        except Exception:
+            cur_scene = None
+    # Resolve entrance candidate
+    cand_id = None
+    ent = None
+    term = (entrance or "").strip()
+    if term:
+        # match by id first
+        if term in (WORLD.entrances or {}):
+            cand_id = term
+            ent = WORLD.entrances.get(cand_id)
+        else:
+            # match by label within current scene
+            for eid, e in (WORLD.entrances or {}).items():
+                try:
+                    if str(e.get("from_scene")) != str(cur_scene):
+                        continue
+                    if str(e.get("label", "")) == term:
+                        cand_id = str(eid)
+                        ent = e
+                        break
+                except Exception:
+                    continue
+    if ent is None:
+        return ToolResponse(
+            content=[TextBlock(type="text", text=f"未找到可用入口（from={cur_scene} term={term or '(未提供)'}）")],
+            metadata={"ok": False, "error_type": "entrance_not_found", "from_scene": cur_scene, "entrance": entrance},
+        )
+    # Validate from_scene
+    if cur_scene and str(ent.get("from_scene")) != str(cur_scene):
+        return ToolResponse(
+            content=[TextBlock(type="text", text=f"入口不在当前场景：{ent.get('label','')} 属于 {ent.get('from_scene')}。")],
+            metadata={"ok": False, "error_type": "wrong_scene", "from_scene": cur_scene, "entrance_id": cand_id},
+        )
+    # Extract coordinates
+    at = ent.get("at") or []
+    if not (isinstance(at, (list, tuple)) and len(at) >= 2):
+        return ToolResponse(content=[TextBlock(type="text", text=f"入口坐标无效：{cand_id}")], metadata={"ok": False, "error_type": "invalid_entrance"})
+    ex, ey = int(at[0]), int(at[1])
+    # Move towards if not yet there
+    pos = WORLD.positions.get(nm)
+    if pos is None:
+        pos = (0, 0)
+        WORLD.positions[nm] = pos
+    if tuple(pos) != (ex, ey):
+        mv = move_towards(nm, (ex, ey))
+        meta = dict(mv.metadata or {})
+        # If after movement we've arrived, fall through to enter
+        pos2 = tuple(WORLD.positions.get(nm) or pos)
+        if pos2 != (ex, ey):
+            text = f"朝入口靠近：{ent.get('label','')}（剩余 {meta.get('remaining', _grid_distance(pos2, (ex,ey)))} 步）"
+            blocks = list(mv.content or [])
+            blocks.append(TextBlock(type="text", text=text))
+            return ToolResponse(
+                content=blocks,
+                metadata={
+                    "ok": True,
+                    "status": "approaching",
+                    "entrance_id": cand_id,
+                    "entrance_label": ent.get("label"),
+                    "from_scene": cur_scene,
+                    "to_scene": ent.get("to_scene"),
+                    "remaining_steps": meta.get("remaining", _grid_distance(pos2, (ex, ey))),
+                },
+            )
+    # Enter and switch scene
+    spawn = ent.get("spawn") or []
+    try:
+        sx, sy = int(spawn[0]), int(spawn[1])
+    except Exception:
+        sx, sy = 0, 0
+    WORLD.scene_of[nm] = str(ent.get("to_scene", ""))
+    set_position(nm, sx, sy)
+    # Apply scene presentation if known
+    dst_scene_id = str(ent.get("to_scene", ""))
+    sc = WORLD.scenes.get(dst_scene_id, {}) if WORLD.scenes else {}
+    try:
+        set_scene(
+            sc.get("name", dst_scene_id),
+            details=(sc.get("details") if isinstance(sc.get("details"), list) else None),
+            weather=sc.get("weather"),
+            time=sc.get("time"),
+        )
+    except Exception:
+        pass
+    WORLD._touch()
+    text = f"通过入口 {ent.get('label','')} 进入 {_scene_name(dst_scene_id)}"
+    return ToolResponse(
+        content=[TextBlock(type="text", text=text)],
+        metadata={
+            "ok": True,
+            "status": "arrived",
+            "entrance_id": cand_id,
+            "entrance_label": ent.get("label"),
+            "from_scene": cur_scene,
+            "to_scene": dst_scene_id,
+            "position": [sx, sy],
+        },
+    )
 
 
 def list_world_ids() -> List[str]:
@@ -494,6 +644,387 @@ def list_world_ids() -> List[str]:
 def select_world(world_id: Optional[str] = None) -> dict:
     """Convenience wrapper to initialise world for a chosen id and return snapshot."""
     return init_world_from_configs(selected_story_id=world_id, reset=True)
+
+# ---- Visibility helpers and environment rendering ----
+
+def visible_snapshot_for(
+    name: Optional[str], *, filter_to_scene: bool = True
+) -> dict:
+    """Return a filtered snapshot representing what `name` can see.
+
+    - Always scoped to a scene; if无法解析角色场景且 filter_to_scene=True，则返回空结构。
+    - 不提供全局快照路径。
+    """
+    # Resolve current scene id
+    cur_scene_id: Optional[str] = None
+    if name:
+        s = (WORLD.scene_of or {}).get(str(name))
+        if isinstance(s, str) and s:
+            cur_scene_id = s
+    if not cur_scene_id and not filter_to_scene:
+        # Fallback to mapping location->scene when explicitly unscoped is requested
+        try:
+            loc = str(WORLD.location or "")
+            for sid, cfg in (WORLD.scenes or {}).items():
+                if str((cfg or {}).get("name", sid)) == loc:
+                    cur_scene_id = sid
+                    break
+        except Exception:
+            cur_scene_id = None
+
+    if filter_to_scene and not cur_scene_id:
+        # No scene resolved -> empty view
+        return {
+            "meta": {"scope": "scene", "scene_id": None},
+            "positions": {},
+            "characters": {},
+            "participants": [],
+            "scene_of": dict(WORLD.scene_of or {}),
+            "location": WORLD.location,
+        }
+
+    # Build scene-scoped view
+    scene_of = dict(WORLD.scene_of or {})
+    keep: Set[str] = set()
+    if cur_scene_id:
+        for nm, sc in scene_of.items():
+            if str(sc) == str(cur_scene_id):
+                keep.add(str(nm))
+    positions = {k: list(v) for k, v in (WORLD.positions or {}).items() if not cur_scene_id or str(k) in keep}
+    characters = {k: dict(v or {}) for k, v in (WORLD.characters or {}).items() if not cur_scene_id or str(k) in keep}
+    parts = [nm for nm in (WORLD.participants or []) if not cur_scene_id or str(nm) in keep]
+    # Minimal refs for weapons/arts/inventory so UIs can render HUD
+    out: Dict[str, Any] = {
+        "meta": {"scope": "scene", "scene_id": str(cur_scene_id) if cur_scene_id else None},
+        "time_min": WORLD.time_min,
+        "weather": WORLD.weather,
+        "location": WORLD.location,
+        "scene_details": list(WORLD.scene_details or []),
+        "objectives": list(WORLD.objectives or []),
+        "objective_status": dict(WORLD.objective_status or {}),
+        "positions": positions,
+        "characters": characters,
+        "participants": parts,
+        "scene_of": scene_of,
+        "weapon_defs": {wid: {
+            "label": str((wd or {}).get("label", "")),
+            "desc": str((wd or {}).get("desc") or (wd or {}).get("description", "")),
+            "reach_steps": int((wd or {}).get("reach_steps", DEFAULT_REACH_STEPS)),
+            "skill": str((wd or {}).get("skill", "")),
+            "defense_skill": str((wd or {}).get("defense_skill", "")),
+            "damage": str((wd or {}).get("damage", "")),
+            "damage_type": str((wd or {}).get("damage_type", "physical")),
+        } for wid, wd in (WORLD.weapon_defs or {}).items()},
+        "inventory": dict(WORLD.inventory or {}),
+        "scenes": {k: {"name": str((v or {}).get("name", k))} for k, v in (WORLD.scenes or {}).items()},
+        "entrances": {eid: {
+            "label": str((e or {}).get("label", "")),
+            "from_scene": str((e or {}).get("from_scene", "")),
+            "to_scene": str((e or {}).get("to_scene", "")),
+            "at": (list((e or {}).get("at", [])) if isinstance((e or {}).get("at"), list) else None),
+            "spawn": (list((e or {}).get("spawn", [])) if isinstance((e or {}).get("spawn"), list) else None),
+            "desc": str((e or {}).get("desc") or (e or {}).get("description", "")),
+        } for eid, e in (WORLD.entrances or {}).items()},
+    }
+    # Expose relations in a lightweight form: "A->B": score. Scope to current scene when applicable.
+    try:
+        rel_items = list((WORLD.relations or {}).items())
+        rel_map: Dict[str, int] = {}
+        for (a, b), v in rel_items:
+            if cur_scene_id and not (str(a) in keep and str(b) in keep):
+                continue
+            try:
+                rel_map[f"{a}->{b}"] = int(v)
+            except Exception:
+                continue
+        out["relations"] = rel_map
+    except Exception:
+        pass
+    return out
+
+
+def render_env_for(
+    name: Optional[str],
+    *,
+    filter_to_scene: bool = True,
+    include_entrances: bool = True,
+    max_entrances: int = 3,
+    include_objectives: bool = True,
+    show_positions: bool = True,
+    show_chars: bool = True,
+) -> ToolResponse:
+    """Render a concise environment text for `name` suitable for prompt injection.
+
+    The text mirrors the structure used by main._world_summary_text but scoped and
+    sorted from the actor's perspective. Metadata includes scope/scene markers.
+    """
+    snap = visible_snapshot_for(name, filter_to_scene=filter_to_scene)
+    try:
+        t = int(snap.get("time_min", 0))
+    except Exception:
+        t = 0
+    hh, mm = t // 60, t % 60
+    weather = snap.get("weather", "unknown")
+    location = snap.get("location", "未知")
+    lines: List[str] = [f"现在：地点 {location}；时间 {hh:02d}:{mm:02d}；天气 {weather}"]
+    # Details
+    details = [d for d in (snap.get("scene_details") or []) if isinstance(d, str) and d.strip()]
+    if details:
+        lines.append("环境细节：" + "；".join(details))
+    # Objectives
+    if include_objectives:
+        objectives = snap.get("objectives", []) or []
+        obj_status = snap.get("objective_status", {}) or {}
+        if objectives:
+            s = "; ".join((f"{str(o)}({obj_status.get(str(o))})" if obj_status.get(str(o)) else str(o)) for o in objectives)
+        else:
+            s = "无"
+        lines.append("目标：" + s)
+    # Positions (sorted by distance; 'name' first)
+    pos_map = dict((snap.get("positions") or {}))
+    if show_positions and pos_map:
+        items = list(pos_map.items())
+        me = pos_map.get(str(name)) if name else None
+        if me:
+            mx, my = int(me[0]), int(me[1])
+            def _dist_xy(xy: Any) -> int:
+                try:
+                    return abs(mx - int(xy[0])) + abs(my - int(xy[1]))
+                except Exception:
+                    return 10 ** 9
+            items.sort(key=lambda kv: (0 if kv[0] == str(name) else 1, _dist_xy(kv[1]), kv[0]))
+        pos_line = "; ".join(f"{nm}({xy[0]}, {xy[1]})" for nm, xy in items)
+        lines.append("坐标：" + (pos_line if pos_line else "未记录"))
+    # Characters (HP, dying/dead; sorted by distance)
+    ch_map = dict((snap.get("characters") or {}))
+    if show_chars and ch_map:
+        entries: List[Tuple[str, str]] = []
+        for nm, st in ch_map.items():
+            hp = st.get("hp")
+            max_hp = st.get("max_hp")
+            if hp is None or max_hp is None:
+                continue
+            extra = ""
+            try:
+                dt = st.get("dying_turns_left", None)
+                if dt is not None:
+                    extra = f"（濒死{int(dt)}）"
+                elif int(hp) <= 0:
+                    extra = "（死亡）"
+            except Exception:
+                pass
+            entries.append((str(nm), f"{nm}(HP {hp}/{max_hp}){extra}"))
+        if entries:
+            me_xy = pos_map.get(str(name)) if name else None
+            if me_xy:
+                def _dist_nm(nm: str) -> int:
+                    xy = pos_map.get(nm)
+                    if not xy:
+                        return 10 ** 9
+                    try:
+                        return abs(int(xy[0]) - int(me_xy[0])) + abs(int(xy[1]) - int(me_xy[1]))
+                    except Exception:
+                        return 10 ** 9
+                entries.sort(key=lambda t: (0 if t[0] == str(name) else 1, _dist_nm(t[0]), t[0]))
+            lines.append("角色：" + "; ".join(txt for _, txt in entries))
+        else:
+            lines.append("角色：未登记")
+    # Entrances (limited to current scene)
+    if include_entrances:
+        meta = dict(snap.get("meta") or {})
+        cur_scene_id = meta.get("scene_id") if meta.get("scope") == "scene" else None
+        scenes = snap.get("scenes", {}) or {}
+        entrances = snap.get("entrances", {}) or {}
+        me_xy = pos_map.get(str(name)) if name else None
+        ents: List[Tuple[int, str]] = []
+        for _, e in entrances.items():
+            try:
+                if cur_scene_id and str(e.get("from_scene", "")) != str(cur_scene_id):
+                    continue
+                label = str(e.get("label", ""))
+                to_id = str(e.get("to_scene", ""))
+                to_name = str((scenes.get(to_id, {}) or {}).get("name", to_id))
+                at = e.get("at")
+                steps = None
+                if me_xy and isinstance(at, (list, tuple)) and len(at) >= 2:
+                    try:
+                        steps = abs(int(at[0]) - int(me_xy[0])) + abs(int(at[1]) - int(me_xy[1]))
+                    except Exception:
+                        steps = None
+                if isinstance(at, (list, tuple)) and len(at) >= 2:
+                    head = f"{label} @ ({int(at[0])},{int(at[1])})（通往{to_name}）"
+                else:
+                    head = f"{label}（通往{to_name}）"
+                text = head + (f"，距你{steps}步" if steps is not None else "")
+                ents.append((steps if steps is not None else 10 ** 9, text))
+            except Exception:
+                continue
+        if ents:
+            ents.sort(key=lambda t: (t[0], t[1]))
+            lines.append("入口：" + "；".join([t[1] for t in ents[: max_entrances if max_entrances and max_entrances > 0 else 3]]))
+    # Note: 已移除“其它场景：N 人”的汇总行，避免向模型暴露跨场景人数噪音。
+
+    text = "\n".join(lines)
+    md = {"ok": True, **(snap.get("meta") or {})}
+    if name is not None:
+        md["actor"] = str(name)
+    return ToolResponse(content=[TextBlock(type="text", text=text)], metadata=md)
+
+
+# ---- Reach preview rendering (scoped) ----
+
+# Relation thresholds for categorization (keep in world to avoid UI coupling)
+RELATION_INTIMATE_FRIEND = 60
+RELATION_CLOSE_ALLY = 40
+RELATION_ALLY = 10
+RELATION_HOSTILE = -10
+RELATION_ENEMY = -40
+RELATION_ARCH_ENEMY = -60
+
+def _relation_category(score: int) -> str:
+    if score >= RELATION_INTIMATE_FRIEND:
+        return "挚友"
+    if score >= RELATION_CLOSE_ALLY:
+        return "亲密同伴"
+    if score >= RELATION_ALLY:
+        return "盟友"
+    if score <= RELATION_ARCH_ENEMY:
+        return "死敌"
+    if score <= RELATION_ENEMY:
+        return "仇视"
+    if score <= RELATION_HOSTILE:
+        return "敌对"
+    return "中立"
+
+# Labels used in preview text
+_REACH_RULE_LINE = "作战规则：只能对reach_preview的“可及目标”使用 perform_attack。"
+_REACH_LABEL_ADJ = "相邻（≤1步）{tail}："
+_REACH_LABEL_TARGETS = "可及武器（{weapon}，触及 {steps}步）可用目标："
+_REACH_LABEL_ARTS = "可及术式（{art}，触及 {steps}步）可用目标："
+
+def render_reach_preview_for(name: str) -> ToolResponse:
+    """Render reach preview lines for `name` including adjacency, weapons and arts.
+
+    - Scopes to current world; does not include entities from other scenes explicitly,
+      but preview is inherently based on positions grid and inventory/known arts.
+    - Includes one rule line on top to guide valid actions.
+    """
+    nm = str(name)
+    lines: List[str] = [_REACH_RULE_LINE]
+    # Relation lookup: nm->other
+    rel_map: Dict[str, int] = {}
+    try:
+        for (a, b), v in (WORLD.relations or {}).items():
+            if str(a) == nm and str(b) != nm:
+                try:
+                    rel_map[str(b)] = int(v)
+                except Exception:
+                    continue
+    except Exception:
+        rel_map = {}
+
+    def _fmt_steps(n: int) -> str:
+        try:
+            s = int(n)
+        except Exception:
+            s = 0
+        if s < 0:
+            s = 0
+        return f"{s}步"
+
+    def _rel_cat(sc: Optional[int]) -> Optional[str]:
+        if sc is None:
+            return None
+        try:
+            return _relation_category(int(sc))
+        except Exception:
+            return None
+
+    def _fmt_with_rel(nm2: str, steps: int) -> str:
+        tag = _rel_cat(rel_map.get(str(nm2)))
+        return f"{nm2}({_fmt_steps(steps)}; {tag})" if tag else f"{nm2}({_fmt_steps(steps)})"
+
+    # Adjacent units (≤1 step)
+    try:
+        adj = list(list_adjacent_units(nm))
+    except Exception:
+        adj = []
+    if adj:
+        try:
+            react_avail = bool(reaction_available(nm))
+        except Exception:
+            react_avail = True
+        tail = "（反应：可用）" if react_avail else "（反应：已用）"
+        parts = [_fmt_with_rel(n, d) for n, d in adj]
+        lines.append(_REACH_LABEL_ADJ.format(tail=tail) + ", ".join(parts))
+
+    # Weapons preview
+    inv = dict((WORLD.inventory or {}).get(nm, {}) or {})
+    wdefs = dict(WORLD.weapon_defs or {})
+    weapons: List[Tuple[str, int]] = []
+    for wid, cnt in inv.items():
+        try:
+            if int(cnt) <= 0:
+                continue
+        except Exception:
+            continue
+        wid_str = str(wid)
+        if wid_str not in wdefs:
+            continue
+        try:
+            rsteps = int((wdefs[wid_str] or {}).get("reach_steps", 1))
+        except Exception:
+            rsteps = 1
+        weapons.append((wid_str, max(1, rsteps)))
+    weapons.sort(key=lambda t: (t[1], t[0]))
+    for wid, rsteps in weapons:
+        try:
+            items = list(reachable_targets_for_weapon(nm, wid))
+        except Exception:
+            items = []
+        if not items:
+            continue
+        parts = [_fmt_with_rel(n, d) for n, d in items]
+        try:
+            desc = str((wdefs.get(wid) or {}).get("desc") or "")
+        except Exception:
+            desc = ""
+        label_line = _REACH_LABEL_TARGETS.format(weapon=wid, steps=int(rsteps))
+        if desc:
+            head = label_line.replace("可用目标：", "")
+            lines.append(head + "：" + desc)
+            lines.append("可用目标：" + ", ".join(parts))
+        else:
+            lines.append(label_line + ", ".join(parts))
+
+    # Arts preview
+    try:
+        ch = dict((snap.get("characters") or {}).get(nm, {}) or {})
+        known = list((ch.get("coc") or {}).get("arts_known") or [])
+        arts_defs = get_arts_defs() if callable(get_arts_defs) else {}
+        for aid in known:
+            a = (arts_defs or {}).get(str(aid)) or {}
+            rsteps = int(a.get("range_steps", 6) or 6)
+            try:
+                items = list(reachable_targets_for_art(nm, str(aid)))
+            except Exception:
+                items = []
+            if not items:
+                continue
+            parts = [_fmt_with_rel(n, d) for n, d in items]
+            desc = str((a or {}).get("desc") or "")
+            label_line = _REACH_LABEL_ARTS.format(art=str(aid), steps=int(rsteps))
+            if desc:
+                head = label_line.replace("可用目标：", "")
+                lines.append(head + "：" + desc)
+                lines.append("可用目标：" + ", ".join(parts))
+            else:
+                lines.append(label_line + ", ".join(parts))
+    except Exception:
+        pass
+
+    text = "\n".join(lines)
+    return ToolResponse(content=[TextBlock(type="text", text=text)], metadata={"ok": True, "actor": nm})
 
 # ---- Query helpers (pure data; no narration) ----
 def reaction_available(name: str) -> bool:
@@ -931,7 +1462,18 @@ def _grid_distance(a: Tuple[int, int], b: Tuple[int, int]) -> int:
 
 
 def get_distance_steps_between(name_a: str, name_b: str) -> Optional[int]:
-    """Return grid steps between two actors; None if any position missing."""
+    """Return grid steps between two actors; None if any position missing or not in the same scene.
+
+    Minimal multi-scene rule: distance is only defined within the same scene.
+    """
+    # Cross-scene: undefined distance
+    try:
+        sa = WORLD.scene_of.get(str(name_a))
+        sb = WORLD.scene_of.get(str(name_b))
+        if sa is not None and sb is not None and str(sa) != str(sb):
+            return None
+    except Exception:
+        pass
     pa = WORLD.positions.get(str(name_a))
     pb = WORLD.positions.get(str(name_b))
     if pa is None or pb is None:
@@ -1213,7 +1755,7 @@ def move_towards(name: str, target: Tuple[int, int], steps: Optional[int] = None
     )
 
 
-# describe_world has been removed by design. Use WORLD.snapshot() for raw data
+# describe_world has been removed by design. Use visible_snapshot_for(None, filter_to_scene=False)
 # and let higher layers render any human-readable summary.
 
 
@@ -1283,7 +1825,7 @@ def set_scene(
         WORLD.scene_details = vals
     WORLD._touch()
     text = f"设定场景：{WORLD.location}；目标：{'; '.join(WORLD.objectives) if WORLD.objectives else '(无)'}"
-    return ToolResponse(content=[TextBlock(type="text", text=text)], metadata={"ok": True, **WORLD.snapshot()})
+    return ToolResponse(content=[TextBlock(type="text", text=text)], metadata={"ok": True, "location": WORLD.location, "time_min": WORLD.time_min, "weather": WORLD.weather})
 
 
 def add_objective(obj: str):
@@ -1371,6 +1913,116 @@ def roll_initiative(participants: Optional[List[str]] = None):
         metadata={"ok": True, "initiative": ordered, "scores": scores, "policy": meta.get("policy", "dex")},
     )
 
+
+
+def rotation_for_focus(
+    protagonists: Optional[List[str]] = None,
+    *,
+    policy: str = "dex",
+    same_scene: bool = True,
+    include_types: Tuple[str, ...] = ("npc", "player"),
+    include_dying: bool = True,
+    mutate: bool = True,
+) -> ToolResponse:
+    """Compute the per-round rotation list anchored by the player (主角) scene.
+
+    - Focus scene: prefer the first `player`'s scene; if none, map WORLD.location to scene id.
+    - Filter: by scene (when `same_scene=True`), by type (npc/player), and by life state
+      (exclude only true deaths; keep dying when `include_dying=True`).
+    - Order: reuse `compute_action_order` (DEX desc, then name asc).
+    - mutate=True: write the result into WORLD.participants for orchestrator consumption.
+
+    Returns ToolResponse with metadata {ok, order, scores, policy, focus_scene, candidates}.
+    """
+    # Resolve protagonist list; default to the first player in participants/positions/characters order
+    protos: List[str] = []
+    if protagonists:
+        for n in protagonists:
+            s = str(n).strip()
+            if s:
+                protos.append(s)
+    if not protos:
+        # deterministic base order: participants -> positions -> characters
+        base = (
+            list(WORLD.participants)
+            if WORLD.participants
+            else (list(WORLD.positions.keys()) if WORLD.positions else list(WORLD.characters.keys()))
+        )
+        for nm in base:
+            tval = str((WORLD.characters.get(str(nm), {}) or {}).get("type", "npc")).lower()
+            if tval == "player":
+                protos.append(str(nm))
+                break
+
+    # Determine focus scene id
+    scene_map = dict(WORLD.scene_of or {})
+    focus_scene: Optional[str] = None
+    for p in protos:
+        sc = scene_map.get(str(p))
+        if isinstance(sc, str) and sc:
+            focus_scene = sc
+            break
+    if not focus_scene:
+        # Fallback: map WORLD.location to a scene id
+        try:
+            loc = str(WORLD.location or "")
+            for sid, cfg in (WORLD.scenes or {}).items():
+                if str((cfg or {}).get("name", sid)) == loc:
+                    focus_scene = str(sid)
+                    break
+        except Exception:
+            focus_scene = None
+
+    # Build candidate list
+    # Candidate base: use all known characters to allow newcomers in the focus scene
+    # to be added into rotation even if they were not in previous participants.
+    base_names = list((WORLD.characters or {}).keys())
+    candidates: List[str] = []
+    for nm in base_names:
+        name = str(nm)
+        # type filter
+        tval = str((WORLD.characters.get(name, {}) or {}).get("type", "npc")).lower()
+        if tval not in include_types:
+            continue
+        # scene filter
+        if same_scene and focus_scene and scene_map.get(name) != focus_scene:
+            continue
+        # life filter
+        if include_dying:
+            if is_dead(name):
+                continue
+        else:
+            try:
+                st = WORLD.characters.get(name, {}) or {}
+                if int(st.get("hp", 1)) <= 0:
+                    continue
+            except Exception:
+                pass
+        candidates.append(name)
+
+    # Order by policy (default: DEX)
+    res = compute_action_order(participants=candidates, policy=policy)
+    meta = dict(res.metadata or {})
+    order = list(meta.get("order") or [])
+
+    if mutate:
+        try:
+            set_participants(order)
+        except Exception:
+            pass
+
+    out_meta = {
+        "ok": True,
+        "order": order,
+        "scores": dict(meta.get("scores") or {}),
+        "policy": meta.get("policy", policy),
+        "focus_scene": focus_scene,
+        "candidates": list(candidates),
+    }
+    return ToolResponse(
+        content=[TextBlock(type="text", text="轮转：" + (", ".join(order) if order else "(无)"))],
+        metadata=out_meta,
+    )
 
 
 ## end_combat removed: world does not own combat lifecycle
@@ -2478,6 +3130,24 @@ def attack_with_weapon(
     # Post-interception snapshot for defender stat and distance gate
     dfd = WORLD.characters.get(defender, {})
     distance_before = _attack_compute_distance(attacker, defender)
+    # Cross-scene or unknown distance -> treat as unreachable in this minimal scheme
+    if distance_before is None:
+        msg = TextBlock(type="text", text=f"不可达：{attacker} 与 {defender} 不在同一场景，无法以 {weapon} 攻击")
+        return ToolResponse(
+            content=pre_logs + [msg],
+            metadata={
+                "ok": False,
+                "error_type": "out_of_reach",
+                "attacker": attacker,
+                "defender": defender,
+                "weapon_id": weapon,
+                "hit": False,
+                "reach_ok": False,
+                "distance_before": None,
+                "reach_steps": reach_steps,
+                **({"guard": guard_meta} if guard_meta else {}),
+            },
+        )
     if distance_before is not None and distance_before > reach_steps:
         msg = TextBlock(type="text", text=f"距离不足：{attacker} 使用 {weapon} 攻击 {defender} 失败（距离 {_fmt_distance(distance_before)}，触及 {_fmt_distance(reach_steps)}）")
         return ToolResponse(
@@ -3099,6 +3769,12 @@ TOOL_SPECS: Dict[str, ToolSpec] = {
         participants_policy="source",
         source_param="name",
     ),
+    "use_entrance": ToolSpec(
+        required={"name"},
+        actor_keys={"name"},
+        participants_policy="source",
+        source_param="name",
+    ),
     "adjust_relation": ToolSpec(
         required={"a", "b", "value"},
         actor_keys={"a", "b"},
@@ -3232,6 +3908,7 @@ def validated_tool_dispatch() -> Dict[str, Any]:
     return {
         "perform_attack": lambda **p: _validated_call("perform_attack", attack_with_weapon, p),
         "advance_position": _adv_no_steps,
+        "use_entrance": lambda **p: _validated_call("use_entrance", use_entrance, p),
         "adjust_relation": lambda **p: _validated_call("adjust_relation", set_relation, p),
         "transfer_item": lambda **p: _validated_call("transfer_item", grant_item, p),
         "set_protection": lambda **p: _validated_call("set_protection", set_guard, p),

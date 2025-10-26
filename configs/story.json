@@ -37,6 +37,101 @@
         "time": "08:00",
         "weather": "overcast"
       }
+    },
+    "001_entrance_demo": {
+      "meta": {
+        "title": "入口切换最小示例",
+        "style": "场景-入口-非瞬移"
+      },
+      "scenes": {
+        "warehouse_north": {
+          "name": "旧城区·北侧仓棚",
+          "details": [
+            "铁梁回声震耳",
+            "顶板破损，有光束洒落",
+            "木箱凌乱堆叠"
+          ]
+        },
+        "plaza": {
+          "name": "旧城区·广场",
+          "details": [
+            "鸽子受惊",
+            "中心雕像残缺",
+            "石板缝里长着野草"
+          ]
+        }
+      },
+      "entrances": {
+        "door_wn_to_plaza": {
+          "label": "仓棚南门",
+          "from_scene": "warehouse_north",
+          "at": [
+            10,
+            0
+          ],
+          "to_scene": "plaza",
+          "spawn": [
+            10,
+            5
+          ],
+          "desc": "南侧不远处，一扇半掩的铁门（通往广场）"
+        },
+        "gate_plaza_to_wn": {
+          "label": "广场北口",
+          "from_scene": "plaza",
+          "at": [
+            10,
+            5
+          ],
+          "to_scene": "warehouse_north",
+          "spawn": [
+            10,
+            0
+          ],
+          "desc": "北侧台阶尽头，一道石拱门（通往仓棚）"
+        }
+      },
+      "initial_scenes": {
+        "Amiya": "warehouse_north",
+        "Doctor": "warehouse_north",
+        "Faust": "plaza",
+        "Mephisto": "plaza"
+      },
+      "scene_positions": {
+        "warehouse_north": {
+          "Amiya": [
+            0,
+            1
+          ],
+          "Doctor": [
+            0,
+            0
+          ]
+        },
+        "plaza": {
+          "Faust": [
+            12,
+            2
+          ],
+          "Mephisto": [
+            7,
+            -1
+          ]
+        }
+      },
+      "scene": {
+        "name": "旧城区·北侧仓棚",
+        "details": [
+          "铁梁回声震耳",
+          "木箱凌乱堆叠"
+        ],
+        "weather": "overcast",
+        "time": "08:00",
+        "objectives": [
+          "穿过仓棚南门",
+          "在广场与敌对接触"
+        ]
+      }
     }
   }
 }

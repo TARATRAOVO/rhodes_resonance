@@ -80,6 +80,7 @@
   const maxDelay = 8000;
   const maxStory = 500;
   let waitingActor = '';
+  let mapPlayer = '';
   // simple command history for CLI experience
   const cmdHist = [];
   let cmdIdx = -1; // points to next insert position
@@ -422,8 +423,38 @@
         const w = this.canvas.clientWidth || 0;
         const h = this.canvas.clientHeight || 0;
         if (w <= 0 || h <= 0) return;
-        const positions = (state && state.positions) || (this._lastState && this._lastState.positions) || {};
-        const b = this._computeBounds(positions);
+        const st = this._lastState || {};
+        const posAll = (st.positions || {});
+        const sceneOf = st.scene_of || {};
+        // Always prefer a player-anchored focus scene if resolvable
+        let focusScene = null;
+        const chars = st.characters || {};
+        for (const nm of Object.keys(chars)) {
+          try { if (String((chars[nm]||{}).type||'npc').toLowerCase() === 'player') { const sc = sceneOf[nm]; if (typeof sc === 'string' && sc) { focusScene = sc; break; } } } catch(e){}
+        }
+        if (!focusScene) {
+          // fallback: map location name to scene id
+          const loc = String(st.location || '');
+          const scenes = st.scenes || {};
+          for (const sid of Object.keys(scenes)) {
+            try { const nm = String((scenes[sid]||{}).name || sid); if (nm === loc) { focusScene = sid; break; } } catch(e){}
+          }
+        }
+        // Build view positions: if we know the focus scene, show only actors in that scene;
+        // else, fall back to participants; if still not available, show all.
+        let posView = {};
+        if (focusScene) {
+          for (const [nm, p] of Object.entries(posAll)) { if (String(sceneOf[nm]||'') === String(focusScene)) posView[nm] = p; }
+        } else {
+          const parts = Array.isArray(st.participants) ? st.participants.slice() : [];
+          if (parts.length > 0) {
+            const keep = new Set(parts.map(String));
+            for (const [nm, p] of Object.entries(posAll)) { if (keep.has(String(nm))) posView[nm] = p; }
+          } else {
+            posView = posAll;
+          }
+        }
+        const b = this._computeBounds(posView);
         if (!b) {
           if (this.hint) this.hint.textContent = '暂无坐标';
           return;
@@ -434,7 +465,9 @@
         const spanY = (b.maxY - b.minY + 1);
         const stepPx = Math.max(6, Math.min((w - pad*2) / spanX, (h - pad*2) / spanY));
         this._drawGrid(b, stepPx);
-        this._drawActors(this._lastState || {}, b, stepPx);
+        // Render only filtered positions
+        const stateView = Object.assign({}, st, { positions: posView });
+        this._drawActors(stateView, b, stepPx);
       }
       update(state) { this.render(state); }
     }
@@ -599,18 +632,39 @@
     } catch(e){ throw e }
   }
 
-  // 拉取后端预览态（不启动）并渲染
+  // 拉取后端可见快照（不启动）并渲染（地图仅使用该接口）
   async function fetchPreviewAndRender() {
-    const sid = getSelectedStoryId();
-    let url = '/api/preview_state';
-    if (sid) url += `?id=${encodeURIComponent(sid)}`;
-    const res = await fetch(url);
+    const res = await fetch('/api/visible_state');
     if (!res.ok) return;
     const obj = await res.json();
     if (obj && obj.state && !running) {
       renderHUD(obj.state);
       if (mapView) mapView.update(obj.state);
     }
+  }
+
+  async function updateMapFromVisible(actorName) {
+    try {
+      let url = '/api/visible_state';
+      const nm = String(actorName || '').trim();
+      if (nm) url += `?actor=${encodeURIComponent(nm)}`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const obj = await res.json();
+      if (obj && obj.state && mapView) mapView.update(obj.state);
+    } catch(e) { /* ignore */ }
+  }
+
+  function firstPlayerActor() {
+    try {
+      const st = lastState || {};
+      const chars = st.characters || {};
+      for (const nm of Object.keys(chars)) {
+        const t = String(((chars[nm]||{}).type||'npc')).toLowerCase();
+        if (t === 'player') return nm;
+      }
+    } catch(e) { /* ignore */ }
+    return '';
   }
 
   function handleEvent(ev) {
@@ -632,7 +686,8 @@
         }
       }
       renderHUD(lastState);
-      if (mapView) mapView.update(lastState);
+      // 地图仅用可见快照（优先固定玩家名）
+      updateMapFromVisible(mapPlayer || firstPlayerActor());
       return;
     }
     // 精简叙事：展示对白；仅隐藏上下文/回合横幅/世界概要
@@ -768,7 +823,9 @@
         const obj = JSON.parse(m.data);
         if (obj.type === 'hello') {
           if (typeof obj.last_sequence === 'number') lastSeq = Math.max(lastSeq, obj.last_sequence);
-          if (obj.state) { renderHUD(obj.state); if (mapView) mapView.update(obj.state); }
+          if (obj.state) { renderHUD(obj.state); }
+          // 地图仅用可见快照（优先固定玩家名）
+          updateMapFromVisible(mapPlayer || firstPlayerActor());
           // 查询一次运行状态，刷新按钮
           paused = !!obj.paused;
           fetch('/api/state').then(r=>r.json()).then(st => {
@@ -788,6 +845,7 @@
             if (ev && ev.event_type === 'system') {
               if (ev.phase === 'player_input') {
                 waitingActor = String(ev.actor || '');
+                mapPlayer = waitingActor || mapPlayer;
                 playerHint.textContent = waitingActor ? `等待 ${waitingActor} 输入...` : '等待玩家输入...';
                 btnSend.disabled = !waitingActor;
                 if (waitingActor) txtPlayer.focus();
@@ -894,8 +952,9 @@
       // 刷新一下状态
       try {
         const st = await (await fetch('/api/state')).json();
-        if (st && st.state) { renderHUD(st.state); if (mapView) mapView.update(st.state); }
+        if (st && st.state) { renderHUD(st.state); }
         running = !!(st && st.running);
+        await updateMapFromVisible(firstPlayerActor());
       } catch(e){ throw e }
       if (!ws) connectWS();
       updateButtons();
