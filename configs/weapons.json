@@ -5,7 +5,8 @@
     "skill": "Fighting_Blade",
     "defense_skill": "Dodge",
     "damage": "1d4",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "轻巧锋利，近身破绽的裁决。"
   },
   "doctor_baton": {
     "label": "战术警棍",
@@ -13,7 +14,8 @@
     "skill": "Fighting_Blunt",
     "defense_skill": "Dodge",
     "damage": "1d4",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "合金制式，重在制压与留手。"
   },
   "amiya_focus": {
     "label": "源石技艺聚焦器",
@@ -21,7 +23,8 @@
     "skill": "Arts_Offense",
     "defense_skill": "Dodge",
     "damage": "1d6",
-    "damage_type": "arts"
+    "damage_type": "arts",
+    "desc": "刻印导路，令术式在指尖成形。"
   },
   "mephisto_cane": {
     "label": "指挥手杖",
@@ -29,7 +32,8 @@
     "skill": "Arts_Control",
     "defense_skill": "Dodge",
     "damage": "1d6",
-    "damage_type": "arts"
+    "damage_type": "arts",
+    "desc": "银端敲击间，频率与意志同调。"
   },
   "faust_crossbow": {
     "label": "重型弩",
@@ -37,7 +41,8 @@
     "skill": "Firearms_Rifle_Crossbow",
     "defense_skill": "Dodge",
     "damage": "1d8",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "滑车蓄力，箭如判决自远方落下。"
   },
   "spear": {
     "label": "长矛",
@@ -45,7 +50,8 @@
     "skill": "Fighting_Polearm",
     "defense_skill": "Dodge",
     "damage": "1d6",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "二步之内先人一寸，刺突逼退。"
   },
   "longsword": {
     "label": "长剑",
@@ -53,7 +59,8 @@
     "skill": "Fighting_Blade",
     "defense_skill": "Dodge",
     "damage": "1d8",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "攻守相济，老练剑士的标准解。"
   },
   "texas_blades": {
     "label": "双短刀",
@@ -61,7 +68,8 @@
     "skill": "Fighting_DualBlade",
     "defense_skill": "Dodge",
     "damage": "1d6",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "双锋如风，近距连环快斩。"
   },
   "exusiai_pistols": {
     "label": "圣堂双枪",
@@ -69,7 +77,8 @@
     "skill": "Firearms_Handgun",
     "defense_skill": "Dodge",
     "damage": "1d6",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "祈祷与火舌同响，速射织成幕帘。"
   },
   "w_explosives": {
     "label": "爆破装置",
@@ -77,7 +86,8 @@
     "skill": "Throwables_Explosives",
     "defense_skill": "Dodge",
     "damage": "1d8",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "爆鸣先至，余波请自担。"
   },
   "dual_daggers": {
     "label": "双短刃",
@@ -85,7 +95,8 @@
     "skill": "Fighting_DualBlade",
     "defense_skill": "Dodge",
     "damage": "1d6",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "短距缠斗，破绽一现即终章。"
   },
   "chen_blade": {
     "label": "长刀·赤霄",
@@ -93,7 +104,8 @@
     "skill": "Fighting_Blade",
     "defense_skill": "Dodge",
     "damage": "1d8",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "龙门之锋，出鞘即雷霆。"
   },
   "hoshiguma_ogre_club": {
     "label": "鬼角金棒",
@@ -101,6 +113,7 @@
     "skill": "Fighting_Blunt",
     "defense_skill": "Dodge",
     "damage": "1d8",
-    "damage_type": "physical"
+    "damage_type": "physical",
+    "desc": "蛮力直陈，碎盾破阵如摧枯。"
   }
 }

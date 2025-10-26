@@ -6,9 +6,20 @@
     "range_steps": 6,
     "damage_type": "arts",
     "damage": "1d4",
-    "control": { "effect": "restrained", "duration": "1" },
-    "mp": { "cost": 2, "variable": true, "max": 6 },
-    "tags": ["no-guard-intercept", "line-of-sight"]
+    "control": {
+      "effect": "restrained",
+      "duration": "1"
+    },
+    "mp": {
+      "cost": 2,
+      "variable": true,
+      "max": 6
+    },
+    "tags": [
+      "no-guard-intercept",
+      "line-of-sight"
+    ],
+    "desc": "念线缠体，造成轻伤，并使目标短暂束缚（禁止移动与攻击）。"
   },
   "mephisto_resonance": {
     "label": "哼鸣·共振支配",
@@ -16,9 +27,19 @@
     "resist": "Arts_Resist",
     "range_steps": 8,
     "damage_type": "arts",
-    "control": { "effect": "restrained", "duration": "1 + INT_10//10" },
-    "mp": { "cost": 3, "variable": true, "max": 7 },
-    "tags": ["line-of-sight"]
+    "control": {
+      "effect": "restrained",
+      "duration": "1 + INT_10//10"
+    },
+    "mp": {
+      "cost": 3,
+      "variable": true,
+      "max": 7
+    },
+    "tags": [
+      "line-of-sight"
+    ],
+    "desc": "低频共振扰乱神经，使目标短暂束缚，无直接伤害。"
   },
   "mephisto_lullaby": {
     "label": "低吟·沉眠",
@@ -26,9 +47,19 @@
     "resist": "Arts_Resist",
     "range_steps": 6,
     "damage_type": "arts",
-    "control": { "effect": "sleep", "duration": "1" },
-    "mp": { "cost": 4, "variable": true, "max": 8 },
-    "tags": ["line-of-sight"]
+    "control": {
+      "effect": "sleep",
+      "duration": "1"
+    },
+    "mp": {
+      "cost": 4,
+      "variable": true,
+      "max": 8
+    },
+    "tags": [
+      "line-of-sight"
+    ],
+    "desc": "静谧旋律引眠，使目标进入睡眠，无法行动。"
   },
   "mephisto_pain": {
     "label": "痛觉共振",
@@ -37,8 +68,18 @@
     "range_steps": 6,
     "damage_type": "arts",
     "damage": "1d6+1d4",
-    "control": { "effect": "silenced", "duration": "1" },
-    "mp": { "cost": 3, "variable": true, "max": 6 },
-    "tags": ["line-of-sight"]
+    "control": {
+      "effect": "silenced",
+      "duration": "1"
+    },
+    "mp": {
+      "cost": 3,
+      "variable": true,
+      "max": 6
+    },
+    "tags": [
+      "line-of-sight"
+    ],
+    "desc": "放大痛觉回路，造成术式伤害并使目标沉默（禁止施法）。"
   }
 }

@@ -231,6 +231,8 @@ class World:
                 except Exception:
                     rs = int(DEFAULT_REACH_STEPS)
                 out[str(wid)] = {
+                    "label": str(d.get("label", "")),
+                    "desc": str(d.get("desc") or d.get("description", "")),
                     "reach_steps": max(1, rs),
                     "skill": str(d.get("skill", "")),
                     "defense_skill": str(d.get("defense_skill", "")),
@@ -2661,7 +2663,8 @@ def set_arts_defs(defs: Dict[str, Dict[str, Any]]):
       - tags: list[str]
     Note: +POW/POWER 相关写法已移除，不允许在术式中使用 POW/POWER 占位符。
     """
-    allowed = {"label","cast_skill","resist","range_steps","damage_type","mp","damage","heal","control","tags"}
+    # Allow optional one-line description; canonical key is 'desc'.
+    allowed = {"label","cast_skill","resist","range_steps","damage_type","mp","damage","heal","control","tags","desc","description"}
     try:
         cleaned: Dict[str, Dict[str, Any]] = {}
         for k, v in (defs or {}).items():
@@ -2675,6 +2678,12 @@ def set_arts_defs(defs: Dict[str, Dict[str, Any]]):
                 if req not in d:
                     raise ValueError(f"art {k} missing required field '{req}'")
             d["label"] = str(d.get("label") or "")
+            # normalize description aliases to 'desc'
+            if "desc" in d:
+                d["desc"] = str(d.get("desc") or "")
+            elif "description" in d:
+                d["desc"] = str(d.get("description") or "")
+                d.pop("description", None)
             d["cast_skill"] = str(d.get("cast_skill") or "")
             d["resist"] = str(d.get("resist") or "")
             if d["resist"].upper() == "POW":
@@ -2721,6 +2730,7 @@ def get_arts_defs() -> Dict[str, Dict[str, Any]]:
         mp_cfg = dict(d.get("mp") or {}) if isinstance(d.get("mp"), dict) else {}
         out[str(aid)] = {
             "label": str(d.get("label", "")),
+            **({"desc": str(d.get("desc", ""))} if d.get("desc") else {}),
             "cast_skill": str(d.get("cast_skill", "")),
             "resist": str(d.get("resist", "")),
             "range_steps": int(d.get("range_steps", 6) or 6),

@@ -88,7 +88,7 @@ DEFAULT_RECAP_MSG_LIMIT = 6
 DEFAULT_RECAP_ACTION_LIMIT = 6
 
 # System prompt building (tools list + templates)
-DEFAULT_TOOLS_TEXT = "perform_attack(), cast_arts(), advance_position(), adjust_relation(), transfer_item(), set_protection(), clear_protection(), first_aid()"
+DEFAULT_TOOLS_TEXT = "perform_attack(), cast_arts(), advance_position(), set_relation(), transfer_item(), set_protection(), clear_protection(), first_aid()"
 
 # Enforce JSON-only replies mode. When enabled, agents must output exactly one
 # JSON object with the shape: {"speech": str, "actions": [{"tool": str, "args": dict}, ...]}.
@@ -105,7 +105,6 @@ DEFAULT_PROMPT_HEADER = (
     "人设：{persona}\n"
     "外观特征：{appearance}\n"
     "你之前说过这些话：{quotes}\n"
-    "这些是场上你的朋友，或者敌人：{relation_brief}\n"
 )
 
 # --- JSON-only template (active when JSON_ONLY_MODE=True) ---
@@ -117,17 +116,16 @@ DEFAULT_PROMPT_JSON_INSTRUCTIONS = (
     "- speech：1-2句中文对白；禁止括号旁白/系统提示；可留空（例如只行动）。\n"
     "- description：1-2句中文，用于合并表达想法/微动作/简短旁白。\n"
     "- actions：如无行动则为 []。如需行动，每个元素：\n"
-    "  * tool 取自：perform_attack, cast_arts, advance_position, adjust_relation, transfer_item, set_protection, clear_protection, first_aid；\n"
+    "  * tool 取自：perform_attack, cast_arts, advance_position, set_relation, transfer_item, set_protection, clear_protection, first_aid；\n"
     "  * args 为严格 JSON（双引号）；必须包含简短 reason(≤30字)；\n"
-    "    - 坐标参数使用数组 [x,y] 且为整数；\n"
-    "    - 角色名称仅可使用：{allowed_names}；\n"
+    "  * 行动默认为由你自己执行，只需要选择目标（统一使用 target 字段），例如攻击/施法的目标、守护的被保护者等。\\n"
     "- 硬规则：只能对 reach_preview 中的可及目标使用 perform_attack；不满足触及时应先 advance_position。\n"
 )
 
 DEFAULT_PROMPT_JSON_EXAMPLE = (
     "输出示例（仅供你参考，不要输出这段文字）：\n"
     # Escape braces so this example survives str.format
-    '{{\"speech\": [\"阿米娅：小心前方。\"], \"description\": [\"她压低身形，向前探查。\", \"不能让他们受伤。\"], \"actions\": [{{\"tool\": \"advance_position\", \"args\": {{\"name\": \"Amiya\", \"target\": [1,1], \"reason\": \"靠近掩体\"}}}}]}}'
+    '{{\"speech\": [\"阿米娅：小心前方。\"], \"description\": [\"她压低身形，向前探查。\", \"不能让他们受伤。\"], \"actions\": [{{\"tool\": \"advance_position\", \"args\": {{\"target\": [1,1], \"reason\": \"靠近掩体\"}}}}]}}'
 )
 
 DEFAULT_PROMPT_JSON_TEMPLATE = (
@@ -483,7 +481,8 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         )
         return resp
 
-    def adjust_relation(a, b, value, reason: str = ""):
+    def set_relation(a, b, value, reason: str = ""):
+        # kept world API: world.set_relation, validated entry is still named 'adjust_relation' at world-level
         fn = _VALIDATED.get("adjust_relation") or (lambda **p: world.set_relation(**p))
         resp = fn(a=a, b=b, value=value, reason=reason or "")
         meta = resp.metadata or {}
@@ -588,7 +587,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         perform_attack,
         cast_arts,
         advance_position,
-        adjust_relation,
+        set_relation,
         transfer_item,
         set_protection,
         clear_protection,
@@ -598,7 +597,9 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         "perform_attack": perform_attack,
         "cast_arts": cast_arts,
         "advance_position": advance_position,
-        "adjust_relation": adjust_relation,
+        "set_relation": set_relation,
+        # Back-compat: keep old name mapped to the same function (not advertised)
+        "adjust_relation": set_relation,
         "transfer_item": transfer_item,
         "set_protection": set_protection,
         "clear_protection": clear_protection,
@@ -1232,8 +1233,52 @@ async def _execute_actions_from_json(
     actions: List[Tuple[str, dict]],
     hub: "MsgHub",
 ) -> None:
-    """Execute parsed actions (tool, args) with logging and broadcasting, mirroring handle_tool_calls."""
+    """Execute parsed actions (tool, args) with logging and broadcasting, mirroring handle_tool_calls.
+
+    Implements implicit-actor semantics: the calling actor is the default source
+    for tools; the model should not pass `name`/`attacker` explicitly. We also
+    normalise a few common aliases (e.g., `target` -> `defender`/`protectee`).
+    """
+
+    def _normalize_action_params(tool: str, params: Dict[str, Any], actor: str) -> Dict[str, Any]:
+        p = dict(params or {})
+        t = str(tool)
+        # Unify target aliases and inject implicit actor
+        if t == "perform_attack":
+            p.setdefault("attacker", actor)
+            if "defender" not in p and "target" in p:
+                p["defender"] = p.get("target")
+            # drop alias to avoid unexpected kwargs downstream
+            p.pop("target", None)
+        elif t == "cast_arts":
+            p.setdefault("attacker", actor)
+            # keep target as-is (required by world)
+            p.pop("name", None)
+        elif t == "advance_position":
+            p.setdefault("name", actor)
+        elif t == "first_aid":
+            p.setdefault("name", actor)
+        elif t == "set_protection":
+            p.setdefault("guardian", actor)
+            if "protectee" not in p and "target" in p:
+                p["protectee"] = p.get("target")
+            p.pop("target", None)
+        elif t == "clear_protection":
+            # default to clearing self's guard on the target; keep broader forms explicit
+            p.setdefault("guardian", actor)
+            if "protectee" not in p and "target" in p:
+                p["protectee"] = p.get("target")
+            p.pop("target", None)
+        elif t in ("set_relation", "adjust_relation"):
+            p.setdefault("a", actor)
+            if "b" not in p and "target" in p:
+                p["b"] = p.get("target")
+            p.pop("target", None)
+        # Ensure no stray implicit keys remain
+        return p
+
     for tool_name, params in list(actions or []):
+        params = _normalize_action_params(tool_name, dict(params or {}), origin_actor)
         phase = f"tool:{tool_name}"
         func = ctx.tool_dispatch.get(tool_name)
         if not func:
@@ -1621,6 +1666,46 @@ def reach_preview_lines(world: Any, name: str) -> List[str]:
         if str(name) not in (pos_map or {}):
             return lines
 
+        # Build a quick lookup of my relations to others for inline labels in reach preview
+        # Only consider directed edges: me -> other. Keep this lightweight to control token cost.
+        rel_map: Dict[str, int] = {}
+        try:
+            rel = dict((snap.get("relations") or {}))
+            me = str(name)
+            for k, v in (rel or {}).items():
+                try:
+                    a, b = str(k).split("->", 1)
+                except Exception:
+                    continue
+                if a != me or b == me:
+                    continue
+                try:
+                    rel_map[str(b)] = int(v)
+                except Exception:
+                    # ignore malformed values
+                    pass
+        except Exception:
+            rel_map = {}
+
+        def _rel_cat(sc: Optional[int]) -> Optional[str]:
+            if sc is None:
+                return None
+            try:
+                return _relation_category(int(sc))
+            except Exception:
+                return None
+
+        def _fmt_with_rel(nm: str, steps: int) -> str:
+            """Append a compact relation tag to a reachable target.
+
+            Format: Name(3步; 敌对) — omits tag when no relation known.
+            Keep concise to reduce token footprint; do not include raw score by default.
+            """
+            tag = _rel_cat(rel_map.get(str(nm)))
+            if tag:
+                return f"{nm}({_fmt_steps(steps)}; {tag})"
+            return f"{nm}({_fmt_steps(steps)})"
+
         # Adjacent units (≤1 步)
         try:
             adj = list(world.list_adjacent_units(name))
@@ -1632,7 +1717,7 @@ def reach_preview_lines(world: Any, name: str) -> List[str]:
             except Exception:
                 react_avail = True
             tail = "（反应：可用）" if react_avail else "（反应：已用）"
-            parts = [f"{nm}({_fmt_steps(d)})" for nm, d in adj]
+            parts = [_fmt_with_rel(nm, d) for nm, d in adj]
             lines.append(REACH_LABEL_ADJ.format(tail=tail) + ", ".join(parts))
 
         # Weapons: iterate inventory to show per-weapon可及目标
@@ -1661,11 +1746,21 @@ def reach_preview_lines(world: Any, name: str) -> List[str]:
                 items = []
             if not items:
                 continue
-            parts = [f"{nm}({_fmt_steps(d)})" for nm, d in items]
-            lines.append(
-                REACH_LABEL_TARGETS.format(weapon=wid, steps=int(rsteps))
-                + ", ".join(parts)
-            )
+            parts = [_fmt_with_rel(nm, d) for nm, d in items]
+            # id + optional desc (no label in display)
+            try:
+                desc = str((wdefs.get(wid) or {}).get("desc") or "")
+            except Exception:
+                desc = ""
+            wid_display = wid
+            label_line = REACH_LABEL_TARGETS.format(weapon=wid_display, steps=int(rsteps))
+            if desc:
+                # Split into two lines when description exists
+                head = label_line.replace("可用目标：", "")
+                lines.append(head + "：" + desc)
+                lines.append("可用目标：" + ", ".join(parts))
+            else:
+                lines.append(label_line + ", ".join(parts))
 
         # Arts preview（已知术式，按射程筛选，不考虑 LOS）
         try:
@@ -1681,11 +1776,16 @@ def reach_preview_lines(world: Any, name: str) -> List[str]:
                     items = []
                 if not items:
                     continue
-                parts = [f"{nm}({_fmt_steps(d)})" for nm, d in items]
-                lines.append(
-                    REACH_LABEL_ARTS.format(art=str(aid), steps=int(rsteps))
-                    + ", ".join(parts)
-                )
+                parts = [_fmt_with_rel(nm, d) for nm, d in items]
+                desc = str((a or {}).get("desc") or "")
+                aid_display = str(aid)
+                label_line = REACH_LABEL_ARTS.format(art=aid_display, steps=int(rsteps))
+                if desc:
+                    head = label_line.replace("可用目标：", "")
+                    lines.append(head + "：" + desc)
+                    lines.append("可用目标：" + ", ".join(parts))
+                else:
+                    lines.append(label_line + ", ".join(parts))
         except Exception:
             pass
     except Exception:
