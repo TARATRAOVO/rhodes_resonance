@@ -2511,10 +2511,12 @@ async def run_demo(
                             label = _relation_category(sc)
                         except Exception:
                             label = "中立"
-                        lines_priv.append(PRIV_SPEECH_TITLE)
-                        lines_priv.append(PRIV_SPEECH_SPEAKER.format(who=sp))
-                        lines_priv.append(PRIV_SPEECH_CONTENT.format(text=txtp))
-                        lines_priv.append(PRIV_SPEECH_REL.format(score=sc, label=label))
+                        # 玩家自己的回合里，“优先处理对白”将由玩家当前输入覆盖，不再在此重复注入
+                        if str(actor_types.get(name, "npc")) != "player":
+                            lines_priv.append(PRIV_SPEECH_TITLE)
+                            lines_priv.append(PRIV_SPEECH_SPEAKER.format(who=sp))
+                            lines_priv.append(PRIV_SPEECH_CONTENT.format(text=txtp))
+                            lines_priv.append(PRIV_SPEECH_REL.format(score=sc, label=label))
                     # 回合资源
                     try:
                         mv_left = int(ts.get("move_left", 0))
@@ -2642,10 +2644,20 @@ async def run_demo(
                             text_in = ""
                     if text_in:
                         # 玩家意图仅对该玩家角色可见：注入到本回合临时 agent 的私有系统提示中
+                        # 并在玩家回合显式给出“优先处理对白”为本次输入，其余私有提示与 NPC 保持一致
                         private_lines = []
                         private_lines.append(PLAYER_CTRL_TITLE)
                         private_lines.append(PLAYER_CTRL_LINE.format(text=text_in))
-                        private_section_pc = "\n".join(private_lines)
+                        # 用当前输入构造“优先处理对白”
+                        speech_lines = []
+                        speech_lines.append(PRIV_SPEECH_TITLE)
+                        speech_lines.append(PRIV_SPEECH_SPEAKER.format(who=name))
+                        speech_lines.append(PRIV_SPEECH_CONTENT.format(text=text_in))
+                        # 合并：玩家控制提示 + 优先处理对白 +（NPC 同款）其他私有提示
+                        if private_section:
+                            private_section_pc = "\n".join(private_lines + speech_lines) + "\n" + private_section
+                        else:
+                            private_section_pc = "\n".join(private_lines + speech_lines)
 
                         # 玩家角色也走一次临时 agent，由模型输出对白并执行工具（不广播原话）
                         await npc_ephemeral_say(

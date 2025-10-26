@@ -20,37 +20,13 @@
 现在：地点 旧城区·北侧仓棚；时间 08:00；天气 overcast
 环境细节：仓棚顶板破损，几缕晨光穿透尘埃；木箱凌乱堆叠，角落潮湿有拖拽痕迹；远处传来金属碰撞与杂音；旧城区·北侧仓棚。铁梁回声震耳。
 目标：冲突终结(pending)
-坐标：Amiya(5, 1); Doctor(7, -1); Faust(10, 2); Mephisto(7, -1)
-角色：Doctor(HP 7/11); Amiya(HP 4/10); Mephisto(HP 8/11); Faust(HP 9/12)
-
---- [recap] ---
-回顾
-刚才...：
-- Faust: 他强行抬起被缠住的弩臂，瞳中绿光冷得像破晓前的霜。
-- Faust: 扳机扣到一半，弦声暗哑，却仍锁定博士的心口。
-- Faust[tool]: Faust 处于restrained状态，无法发动攻击。
-- Doctor: 杀。
-- Doctor: 兜帽下的灰瞳骤然收缩，我挣脱最后一丝睡意，反手握刀，一步贴到Mephisto面前。
-- Doctor[tool]: Doctor 处于sleep状态，无法发动攻击。
+坐标：Amiya(0, 1); Doctor(0, 0); Faust(12, 2); Mephisto(7, -1)
+角色：Doctor(HP 11/11); Amiya(HP 10/10); Mephisto(HP 6/11); Faust(HP 12/12)
 
 --- [reach_preview] ---
 作战规则：只能对reach_preview的“可及目标”使用 perform_attack。
+相邻（≤1步）（反应：可用）：Doctor(1步; 挚友)
 可及武器（amiya_focus，触及 6步）：刻印导路，令术式在指尖成形。
-可用目标：Doctor(4步; 挚友), Mephisto(4步; 死敌), Faust(6步; 死敌)
+可用目标：Doctor(1步; 挚友)
 可及术式（amiya_binding，触及 6步）：念线缠体，造成轻伤，并使目标短暂束缚（禁止移动与攻击）。
-可用目标：Doctor(4步; 挚友), Mephisto(4步; 死敌), Faust(6步; 死敌)
-
---- [private] ---
-优先处理对白（仅你可见）：
-- 说话者：Doctor
-- 内容：兜帽下的灰瞳骤然收缩，我挣脱最后一丝睡意，反手握刀，一步贴到Mephisto面前。
-- 你对该角色的关系：+85（挚友）
-回合资源（仅你可见）：
-- 移动：5/5 步
-- 动作：可用；附赠动作：可用；反应：可用
-作战规则：只能对reach_preview的“可及目标”使用 perform_attack。
-有效行动要求：存在敌对关系时，每回合必须进行一次有效行动；对超出触及范围的 perform_attack 视为无效。
-距离提示（仅你可见）：
-- Doctor：4步
-- Mephisto：4步
-- Faust：6步
+可用目标：Doctor(1步; 挚友)
