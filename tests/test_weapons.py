@@ -1,6 +1,6 @@
 import random
 
-from world.tools import (
+from world.core import (
     WORLD,
     set_coc_character,
     set_position,

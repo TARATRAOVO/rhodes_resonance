@@ -1,12 +1,14 @@
 import random
 
-from world.tools import (
+from world.core import (
     WORLD,
-    attack_roll_dnd,
     get_position,
     roll_dice,
-    set_dnd_character,
     set_position,
+    set_character,
+    set_weapon_defs,
+    grant_item,
+    attack_with_weapon,
 )
 
 
@@ -21,23 +23,25 @@ def test_set_and_get_position():
 def test_stat_block_and_attack():
     # Deterministic randomness
     random.seed(42)
-    set_dnd_character(
-        name="A",
-        ac=12,
-        abilities={"STR": 12, "DEX": 10, "CON": 10, "INT": 10},
-        max_hp=10,
-        move_speed=6,
-    )
-    set_dnd_character(
-        name="B",
-        ac=10,
-        abilities={"STR": 10, "DEX": 10, "CON": 10, "INT": 10},
-        max_hp=10,
-    )
+    set_character(name="A", hp=10, max_hp=10)
+    set_character(name="B", hp=10, max_hp=10)
     set_position("A", 0, 0)
     set_position("B", 0, 1)
-    res = attack_roll_dnd("A", "B", ability="STR", damage_expr="1d4+STR")
-    assert "攻击" in (res.content or [{}])[0].get("text", "")
+    # Define a simple melee weapon and grant to A
+    set_weapon_defs(
+        {
+            "training_blade": {
+                "label": "训练短刃",
+                "reach_steps": 1,
+                "skill": "Fighting_Brawl",
+                "defense_skill": "Dodge",
+                "damage": "1d4",
+                "damage_type": "physical",
+            }
+        }
+    )
+    grant_item("A", "training_blade", 1)
+    res = attack_with_weapon("A", "B", weapon="training_blade")
     # hp should be <= max after damage applied
     hp_after = WORLD.characters["B"]["hp"]
     assert 0 <= hp_after <= WORLD.characters["B"]["max_hp"]
@@ -54,23 +58,24 @@ def test_roll_dice_parse_and_total():
 
 def test_attack_respects_reach_without_auto_move():
     random.seed(1)
-    set_dnd_character(
-        name="A",
-        ac=12,
-        abilities={"STR": 12, "DEX": 10, "CON": 10, "INT": 10},
-        max_hp=10,
-        move_speed=6,
-    )
-    set_dnd_character(
-        name="B",
-        ac=10,
-        abilities={"STR": 10, "DEX": 10, "CON": 10, "INT": 10},
-        max_hp=10,
-    )
+    set_character(name="A", hp=10, max_hp=10)
+    set_character(name="B", hp=10, max_hp=10)
     set_position("A", 0, 0)
     set_position("B", 0, 4)
-
-    res = attack_roll_dnd("A", "B", ability="STR", damage_expr="1d4+STR")
+    set_weapon_defs(
+        {
+            "training_blade": {
+                "label": "训练短刃",
+                "reach_steps": 1,
+                "skill": "Fighting_Brawl",
+                "defense_skill": "Dodge",
+                "damage": "1d4",
+                "damage_type": "physical",
+            }
+        }
+    )
+    grant_item("A", "training_blade", 1)
+    res = attack_with_weapon("A", "B", weapon="training_blade")
     assert res.metadata.get("reach_ok") is False
     assert WORLD.positions["A"] == (0, 0)
 

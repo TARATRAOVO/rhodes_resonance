@@ -55,7 +55,7 @@ from threading import Lock
 
 import logging
 import os
-import world.tools as world_impl
+import src.world.core as world_impl
 
 # ============================================================
 # Prompt & Context Policy (EDIT HERE to control model input)
@@ -926,7 +926,7 @@ def create_logging_context(base_path: Optional[Path] = None) -> LoggingContext:
 
 
 class _WorldPort:
-    """Light adapter around world.tools to avoid component coupling in engine."""
+    """Light adapter around world.core to avoid component coupling in engine."""
 
     # bind frequently used world functions as simple static methods
     set_position = staticmethod(world_impl.set_position)
