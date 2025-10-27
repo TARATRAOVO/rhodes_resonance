@@ -120,6 +120,7 @@ DEFAULT_PROMPT_JSON_INSTRUCTIONS = (
     "  * args 为严格 JSON（双引号）；必须包含简短 reason(≤30字)；\n"
     "  * 行动默认为由你自己执行，只需要选择目标（统一使用 target 字段），例如攻击/施法的目标、守护的被保护者等。\\n"
     "- 若要使用 use_entrance，请将 args.entrance 填为环境概要“入口”段落中显示的入口名称（如：\"仓棚南门\"）\n"
+    "- advance_position.target 既可填写坐标 [x,y]，也可直接填写目标点名称（入口名/角色名/已登记目标点，如：\"仓棚南门\"），系统会自动解析。\n"
     "- 硬规则：只能对 reach_preview 中的可及目标使用 perform_attack；不满足触及时应先 advance_position。\n"
 )
 

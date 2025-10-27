@@ -6,6 +6,7 @@ from pathlib import Path
 import json
 import math
 import random
+import re
 try:
     from agentscope.tool import ToolResponse  # type: ignore
     from agentscope.message import TextBlock  # type: ignore
@@ -623,6 +624,78 @@ def use_entrance(
             "position": [sx, sy],
         },
     )
+
+
+def _resolve_named_target_for_move(name: str, term: str) -> Optional[Tuple[Tuple[int, int], Dict[str, Any]]]:
+    """Resolve a human-friendly target term into coordinates for movement.
+
+    Resolution order (stop on first hit):
+    - "X,Y" string with two integers -> (x, y)
+    - Entrance label in the actor's current scene -> entrance.at
+    - Entrance id (key in WORLD.entrances) -> entrance.at (must match from_scene if actor has one)
+    - WORLD.objective_positions[name]
+    - Another actor's current position (same-scene only when both sides have a scene)
+
+    Returns ((x, y), meta) or None if not resolvable. Meta includes keys:
+    { kind: 'coords'|'entrance'|'objective'|'actor', id/label?: str }
+    """
+    nm = str(name)
+    s = (term or "").strip()
+    if not s:
+        return None
+    # 1) "X,Y" literal
+    m = re.match(r"^\s*([+-]?\d+)\s*,\s*([+-]?\d+)\s*$", s)
+    if m:
+        try:
+            x, y = int(m.group(1)), int(m.group(2))
+            return (x, y), {"kind": "coords"}
+        except Exception:
+            pass
+    # Current scene for scoping entrances/actors
+    cur_scene = _actor_scene(nm)
+    # 2) Entrance by label in current scene
+    for eid, e in (WORLD.entrances or {}).items():
+        try:
+            if cur_scene and str(e.get("from_scene")) != str(cur_scene):
+                continue
+            if str(e.get("label", "")) != s:
+                continue
+            at = e.get("at") or []
+            x, y = int(at[0]), int(at[1])
+            return (x, y), {"kind": "entrance", "id": str(eid), "label": str(e.get("label", ""))}
+        except Exception:
+            continue
+    # 3) Entrance by id (respect from_scene if actor has one)
+    if s in (WORLD.entrances or {}):
+        try:
+            e = WORLD.entrances.get(s) or {}
+            if cur_scene and str(e.get("from_scene")) not in (str(cur_scene), "", "None"):
+                pass  # wrong scene; fall through
+            else:
+                at = e.get("at") or []
+                x, y = int(at[0]), int(at[1])
+                return (x, y), {"kind": "entrance", "id": str(s), "label": str(e.get("label", ""))}
+        except Exception:
+            pass
+    # 4) Objective position registry
+    try:
+        if s in (WORLD.objective_positions or {}):
+            pos = WORLD.objective_positions.get(s)
+            if isinstance(pos, (tuple, list)) and len(pos) >= 2:
+                return (int(pos[0]), int(pos[1])), {"kind": "objective", "id": s}
+    except Exception:
+        pass
+    # 5) Another actor by name (same-scene only when both scenes known)
+    try:
+        pos = (WORLD.positions or {}).get(s)
+        if isinstance(pos, (tuple, list)) and len(pos) >= 2:
+            sc_tgt = _actor_scene(str(s))
+            if cur_scene and sc_tgt and str(cur_scene) != str(sc_tgt):
+                return None
+            return (int(pos[0]), int(pos[1])), {"kind": "actor", "id": s}
+    except Exception:
+        pass
+    return None
 
 
 def list_world_ids() -> List[str]:
@@ -1658,7 +1731,7 @@ def get_reach_steps(name: str) -> int:
     return max(1, int(DEFAULT_REACH_STEPS))
 
 
-def move_towards(name: str, target: Tuple[int, int], steps: Optional[int] = None) -> ToolResponse:
+def move_towards(name: str, target: Tuple[int, int], steps: Optional[int] = None, target_label: Optional[str] = None, target_kind: Optional[str] = None) -> ToolResponse:
     """Move an actor toward target grid using available movement.
 
     - If `steps` is None, use remaining movement this turn (turn_state.move_left);
@@ -1736,8 +1809,10 @@ def move_towards(name: str, target: Tuple[int, int], steps: Optional[int] = None
         ts["move_left"] = max(0, int(default_steps) - int(moved))
     remaining = _grid_distance((x, y), (tx, ty))
     reached = (x, y) == (tx, ty)
+    # Render: include friendly label when provided (e.g., entrance/actor/objective)
+    label_prefix = f"{str(target_label)} " if (target_label or "").strip() else ""
     text = (
-        f"{name} 向 ({tx}, {ty}) 移动 {format_distance_steps(moved)}，现位于 ({x}, {y})。"
+        f"{name} 向 {label_prefix}({tx}, {ty}) 移动 {format_distance_steps(moved)}，现位于 ({x}, {y})。"
         + (" 已抵达目标。" if reached else f" 距目标还差 {format_distance_steps(remaining)}。")
     )
     WORLD._touch()
@@ -1751,6 +1826,8 @@ def move_towards(name: str, target: Tuple[int, int], steps: Optional[int] = None
             "position": [x, y],
             "moved_steps": moved,
             "remaining_steps": remaining,
+            "target_label": (str(target_label).strip() or None),
+            "target_kind": (str(target_kind).strip() if target_kind else None),
         },
     )
 
@@ -3855,21 +3932,39 @@ def _validated_call(tool_name: str, fn, params: Dict[str, Any]) -> ToolResponse:
         if k in p and p[k] is not None:
             p[k] = str(p[k])
 
-    # 3.2) strict type for advance_position.target: must be array [x,y]
+    # 3.2) target normalization for advance_position: accept [x,y] or a named point
     if tool_name == "advance_position":
         tgt = p.get("target")
-        # only accept list/tuple of length >= 2; explicitly reject dict/object
-        if not (isinstance(tgt, (list, tuple)) and len(tgt) >= 2):
+        # Case A: [x, y]
+        if isinstance(tgt, (list, tuple)) and len(tgt) >= 2:
+            try:
+                tx, ty = int(tgt[0]), int(tgt[1])
+                p["target"] = (tx, ty)
+            except Exception:
+                return ToolResponse(
+                    content=[TextBlock(type="text", text="参数错误：target 元素必须为整数，如 [1, 1]")],
+                    metadata={"ok": False, "error_type": "invalid_type", "param": "target"},
+                )
+        # Case B: string label -> resolve to coordinates
+        elif isinstance(tgt, str):
+            nm = str(p.get("name", ""))
+            resolved = _resolve_named_target_for_move(nm, tgt)
+            if not resolved:
+                return ToolResponse(
+                    content=[TextBlock(type="text", text=f"未能解析目标点：{tgt}。请使用 [x,y] 或入口名/角色名/目标点名称。")],
+                    metadata={"ok": False, "error_type": "invalid_value", "param": "target", "value": tgt},
+                )
+            (tx, ty), meta = resolved
+            p["target"] = (int(tx), int(ty))
+            # Preserve friendly label for narration if available
+            if meta.get("kind"):
+                p["target_kind"] = str(meta.get("kind"))
+            label = meta.get("label") or (tgt if meta.get("kind") != "coords" else None)
+            if label:
+                p["target_label"] = str(label)
+        else:
             return ToolResponse(
-                content=[TextBlock(type="text", text="参数错误：advance_position.target 必须为 [x,y] 数组")],
-                metadata={"ok": False, "error_type": "invalid_type", "param": "target"},
-            )
-        try:
-            tx, ty = int(tgt[0]), int(tgt[1])
-            p["target"] = (tx, ty)
-        except Exception:
-            return ToolResponse(
-                content=[TextBlock(type="text", text="参数错误：target 元素必须为整数，如 [1, 1]")],
+                content=[TextBlock(type="text", text="参数错误：advance_position.target 必须为 [x,y] 或 目标点名称（字符串）")],
                 metadata={"ok": False, "error_type": "invalid_type", "param": "target"},
             )
 
