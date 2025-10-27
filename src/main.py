@@ -55,7 +55,18 @@ from threading import Lock
 
 import logging
 import os
-import src.world.core as world_impl
+# Support running both as a module (python -m src.main) and as a file (python src/main.py)
+try:  # when script dir is src/, 'world' is importable
+    import world.core as world_impl  # type: ignore
+except Exception:
+    try:  # when project root on sys.path, 'src.world' works
+        import src.world.core as world_impl  # type: ignore
+    except Exception:
+        # Fallback: insert project root so src.world becomes importable
+        import sys
+        from pathlib import Path as _Path
+        sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+        import src.world.core as world_impl  # type: ignore
 
 # ============================================================
 # Prompt & Context Policy (EDIT HERE to control model input)
