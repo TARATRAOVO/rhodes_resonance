@@ -76,6 +76,15 @@ except Exception:
         sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
         import src.world.core as world_impl  # type: ignore
 
+# Config service (extracted JSON config IO/validation helpers)
+try:
+    from src.config_service import ConfigService  # type: ignore
+except Exception:
+    try:
+        from config_service import ConfigService  # type: ignore
+    except Exception:
+        ConfigService = None  # type: ignore
+
 # ============================================================
 # Prompt & Context Policy (EDIT HERE to control model input)
 # ============================================================
@@ -3409,231 +3418,44 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
     async def _healthz():
         return {"ok": True}
 
-    # --- Simple config editor endpoints (story/characters/weapons) ---
+    # --- Simple config editor endpoints (story/characters/weapons/arts/feature_flags/model) ---
     # These endpoints enable the built-in settings editor (bottom drawer) to
     # fetch and persist JSON configs safely without restarting automatically.
-    cfg_dir = project_root() / "configs"
-
-    def _cfg_path(name: str) -> Path:
-        m = {
-            "story": cfg_dir / "story.json",
-            "characters": cfg_dir / "characters.json",
-            "weapons": cfg_dir / "weapons.json",
-        }
-        if name not in m:
-            raise KeyError(f"unsupported config: {name}")
-        return m[name]
-
-    def _json_load_text(p: Path) -> dict:
-        # no fallback: read and propagate errors
-        with p.open("r", encoding="utf-8") as f:
-            return json.load(f)
-
-    def _validate_story(obj: dict) -> tuple[bool, str]:
-        """Validate story config.
-
-        Accept either a single-story object, or a multi-story container:
-          {"stories": {"id": {...}, ...}}
-        """
-
-        def _validate_one(story: dict) -> tuple[bool, str]:
-            if not isinstance(story, dict):
-                return False, "story must be a JSON object"
-            scene = story.get("scene")
-            if scene is not None and not isinstance(scene, dict):
-                return False, "scene must be object when provided"
-            if isinstance(scene, dict):
-                # details: list of strings
-                det = scene.get("details")
-                if det is not None:
-                    if not isinstance(det, list) or not all(
-                        isinstance(x, str) for x in det
-                    ):
-                        return False, "scene.details must be an array of strings"
-                # objectives: list of strings
-                objs = scene.get("objectives")
-                if objs is not None:
-                    if not isinstance(objs, list) or not all(
-                        isinstance(x, str) for x in objs
-                    ):
-                        return False, "scene.objectives must be an array of strings"
-            # initial_positions: { name: [x,y] }
-            ip = story.get("initial_positions")
-            if ip is not None:
-                if not isinstance(ip, dict):
-                    return False, "initial_positions must be an object"
-                for k, v in ip.items():
-                    if not (isinstance(v, (list, tuple)) and len(v) >= 2):
-                        return False, f"initial_positions.{k} must be [x,y]"
-                    try:
-                        int(v[0])
-                        int(v[1])
-                    except Exception:
-                        return (
-                            False,
-                            f"initial_positions.{k} coordinates must be integers",
-                        )
-            return True, "ok"
-
-        if not isinstance(obj, dict):
-            return False, "story must be a JSON object"
-        # Hard-delete policy: top-level active_id is not supported
-        if "active_id" in obj:
-            return False, "active_id is not supported"
-        # Multi-story container
-        if isinstance(obj.get("stories"), dict):
-            stories = obj.get("stories") or {}
-            for sid, s in stories.items():
-                ok, msg = _validate_one(s)
-                if not ok:
-                    return False, f"story '{sid}' invalid: {msg}"
-            return True, "ok"
-        # Single-story legacy
-        return _validate_one(obj)
-
-    def _validate_weapons(obj: dict) -> tuple[bool, str]:
-        if not isinstance(obj, dict):
-            return False, "weapons must be an object"
-        allowed = {
-            "label",
-            "reach_steps",
-            "skill",
-            "defense_skill",
-            "damage",
-            "damage_type",
-        }
-        for wid, w in obj.items():
-            if not isinstance(w, dict):
-                return False, f"weapon {wid} must be an object"
-            extra = set(w.keys()) - allowed
-            if extra:
-                return False, f"weapon {wid} has unknown keys: {sorted(extra)}"
-            for req in (
-                "label",
-                "reach_steps",
-                "skill",
-                "defense_skill",
-                "damage",
-                "damage_type",
-            ):
-                if req not in w:
-                    return False, f"weapon {wid} missing required field '{req}'"
-            try:
-                rs = int(w.get("reach_steps"))
-                if rs <= 0:
-                    return False, f"weapon {wid}.reach_steps must be > 0"
-            except Exception:
-                return False, f"weapon {wid}.reach_steps must be an integer"
-            dmg = str(w.get("damage") or "").lower()
-            import re as _re
-
-            if not _re.fullmatch(r"\d*d\d+(?:[+-]\d+)?", dmg):
-                return False, f"weapon {wid}.damage must be NdM[+/-K], got '{dmg}'"
-        return True, "ok"
-
-    def _validate_characters(obj: dict) -> tuple[bool, str]:
-        if not isinstance(obj, dict):
-            return False, "characters must be an object"
-        # Loose validation: allow any keys except legacy 'dnd' which is no longer supported
-        for nm, data in obj.items():
-            if nm == "relations":
-                # relations is object of name -> name -> int
-                rel = data
-                if not isinstance(rel, dict):
-                    return False, "relations must be an object"
-                for a, m in rel.items():
-                    if not isinstance(m, dict):
-                        return False, f"relations.{a} must be an object"
-                    for b, val in m.items():
-                        try:
-                            int(val)
-                        except Exception:
-                            return False, f"relations.{a}.{b} must be integer"
-                continue
-            if not isinstance(data, dict):
-                return False, f"character {nm} must be an object"
-            if "dnd" in data:
-                return (
-                    False,
-                    f"character {nm}: 'dnd' block is not supported (use 'coc')",
-                )
-        return True, "ok"
-
-    def _atomic_write(path: Path, obj: dict) -> None:
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        # ensure directory exists
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tmp.open("w", encoding="utf-8") as f:
-            json.dump(obj, f, ensure_ascii=False, indent=2)
-            f.write("\n")
-        tmp.replace(path)
+    cfg_service = ConfigService(project_root(), world_impl) if ConfigService else None
 
     @app.get("/api/config/{name}")
     async def api_get_config(name: str):  # type: ignore[no-redef]
+        if not cfg_service:
+            return JSONResponse({"ok": False, "message": "config service unavailable"}, status_code=500)
         try:
-            p = _cfg_path(str(name))
+            data = cfg_service.read(str(name))
         except KeyError:
-            return JSONResponse(
-                {"ok": False, "message": f"unsupported config: {name}"}, status_code=404
-            )
-        data = _json_load_text(p)
-        # Hard delete policy: never expose legacy active_id back to clients
-        if str(name) == "story" and isinstance(data, dict) and ("active_id" in data):
-            try:
-                data = dict(data)
-                data.pop("active_id", None)
-            except Exception:
-                pass
+            return JSONResponse({"ok": False, "message": f"unsupported config: {name}"}, status_code=404)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "message": f"read failed: {exc}"}, status_code=500)
         return {"ok": True, "name": name, "data": data}
 
     @app.post("/api/config/{name}")
     async def api_set_config(name: str, payload: dict):  # type: ignore[no-redef]
-        name = str(name)
-        try:
-            p = _cfg_path(name)
-        except KeyError:
-            return JSONResponse(
-                {"ok": False, "message": f"unsupported config: {name}"}, status_code=404
-            )
+        if not cfg_service:
+            return JSONResponse({"ok": False, "message": "config service unavailable"}, status_code=500)
         data = dict(payload or {})
-        # Hard delete: reject legacy active_id even if provided
-        if name == "story" and isinstance(data, dict) and ("active_id" in data):
-            return JSONResponse(
-                {"ok": False, "message": "active_id is not supported"}, status_code=422
-            )
-        # validate by type
-        ok = True
-        msg = "ok"
-        if name == "story":
-            ok, msg = _validate_story(data)
-        elif name == "weapons":
-            ok, msg = _validate_weapons(data)
-        elif name == "characters":
-            ok, msg = _validate_characters(data)
-        else:
-            ok = False
-            msg = "unsupported config"
-        if not ok:
-            return JSONResponse({"ok": False, "message": msg}, status_code=422)
-        try:
-            _atomic_write(p, data)
-        except Exception as exc:
-            return JSONResponse(
-                {"ok": False, "message": f"write failed: {exc}"}, status_code=500
-            )
-        return {"ok": True}
-
-    # Helper: list available story ids from config (container -> keys; single -> ['default'] or [])
-    def _list_story_ids() -> list[str]:
-        # Delegate to world component to avoid duplicating parsing logic
-        try:
-            return list(world_impl.list_world_ids())
-        except Exception:
-            return []
+        ok, msg = cfg_service.write(str(name), data)
+        if ok:
+            return {"ok": True}
+        # Map errors to status codes
+        code = 422
+        if msg == "unsupported config":
+            code = 404
+        elif msg in ("read-only", "method not allowed"):
+            code = 405
+        elif msg.startswith("write failed"):
+            code = 500
+        return JSONResponse({"ok": False, "message": msg}, status_code=code)
 
     @app.get("/api/stories")
     async def api_stories(request: Request):  # type: ignore[no-redef]
-        ids = _list_story_ids()
+        ids = (cfg_service.list_story_ids() if cfg_service else [])
         st = _get_session(_parse_sid_from(request))
         sel = (
             st.selected_story_id
@@ -3650,7 +3472,7 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
             return JSONResponse(
                 {"ok": False, "message": "invalid payload"}, status_code=400
             )
-        ids = _list_story_ids()
+        ids = (cfg_service.list_story_ids() if cfg_service else [])
         if not sid or sid not in ids:
             return JSONResponse(
                 {"ok": False, "message": "unknown story id"}, status_code=400
@@ -3673,7 +3495,7 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
         if still empty, fallback to the first available id.
         """
         # Resolve story id
-        ids = _list_story_ids()
+        ids = (cfg_service.list_story_ids() if cfg_service else [])
         if not ids:
             return JSONResponse(
                 {"ok": False, "message": "no stories available"}, status_code=404
@@ -3764,7 +3586,7 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
         except Exception:
             sid = None
         if sid:
-            ids = _list_story_ids()
+            ids = (cfg_service.list_story_ids() if cfg_service else [])
             if sid not in ids:
                 return JSONResponse(
                     {"ok": False, "message": "unknown story id"}, status_code=400
@@ -3822,7 +3644,7 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
         except Exception:
             sid = None
         if sid:
-            ids = _list_story_ids()
+            ids = (cfg_service.list_story_ids() if cfg_service else [])
             if sid not in ids:
                 return JSONResponse(
                     {"ok": False, "message": "unknown story id"}, status_code=400
