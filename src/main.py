@@ -55,6 +55,14 @@ from threading import Lock
 
 import logging
 import os
+# Ensure project root is on sys.path so absolute 'src.*' imports work reliably
+import sys as _sys
+try:
+    _ROOT = str(Path(__file__).resolve().parents[1])
+    if _ROOT not in _sys.path:
+        _sys.path.insert(0, _ROOT)
+except Exception:
+    pass
 # Support running both as a module (python -m src.main) and as a file (python src/main.py)
 try:  # when script dir is src/, 'world' is importable
     import world.core as world_impl  # type: ignore
@@ -1748,6 +1756,7 @@ def make_ephemeral_agent(
         str(persona_now or ""),
         ctx.model_cfg,
         sys_prompt=sys_prompt_text,
+        debug_dump_prompts=ctx.debug_dump_prompts,
         allowed_names=ctx.allowed_names_str,
         appearance=appearance_now,
         quotes=quotes_now,
@@ -1861,48 +1870,13 @@ async def npc_ephemeral_say(
                     pass
         except Exception:
             pass
-    if ctx.debug_dump_prompts:
-        try:
-            root = project_root()
-            dump_dir = root / "logs" / "prompts"
-            dump_dir.mkdir(parents=True, exist_ok=True)
-            safe = "".join(
-                ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in str(name)
-            )
-            # Keep only the latest dump per actor; remove older files for this actor
-            try:
-                for _p in dump_dir.glob(f"{safe}_*.txt"):
-                    try:
-                        _p.unlink()
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-            path = dump_dir / f"{safe}_prompt.txt"
-            sys_text = str(getattr(ephemeral, "_debug_sys_prompt", ""))
-            lines: List[str] = []
-            lines.append("=== SYSTEM PROMPT ===")
-            lines.append(sys_text)
-            lines.append("")
-            lines.append("=== MEMORY MESSAGES (in order) ===")
-            for tk, txt in debug_items:
-                lines.append(f"--- [{tk}] ---")
-                lines.append(str(txt or ""))
-                lines.append("")
-            with path.open("w", encoding="utf-8") as f:
-                f.write("\n".join(lines))
-        except Exception:
-            pass
+    # Prompt payload logging is handled by adapter at the model-call boundary.
+    # Keep this block intentionally empty to avoid duplicating or approximating
+    # what the model actually sees.
     try:
         # Use adapter entrypoint to decouple call site from backend details
-        try:
-            from agent.adapter import ask_once
-        except Exception:
-            try:
-                from src.agent.adapter import ask_once  # type: ignore
-            except Exception:
-                ask_once = None  # type: ignore
-        out = await (ask_once(ephemeral) if ask_once else ephemeral(None))
+        from src.agent.adapter import ask_once  # type: ignore
+        out = await ask_once(ephemeral)
     except Exception as exc:
         # Emit a clear error event for frontend diagnostics
         try:
@@ -2074,6 +2048,7 @@ async def run_demo(
                     persona,
                     model_cfg,
                     sys_prompt=sys_prompt_text,
+                    debug_dump_prompts=DEBUG_DUMP_PROMPTS,
                     allowed_names=allowed_names_str,
                     appearance=appearance,
                     quotes=quotes,
@@ -2773,15 +2748,7 @@ def main() -> None:
     tool_list, tool_dispatch = make_npc_actions(world=world)
 
     # Agent builder: delegate to adapter so only one place knows model plumbing
-    try:
-        from agent.adapter import build_kimi_agent as build_agent  # type: ignore
-    except Exception:
-        try:
-            from src.agent.adapter import build_kimi_agent as build_agent  # type: ignore
-        except Exception:
-            # Fallback to local factory if adapter is unavailable
-            def build_agent(name, persona, model_cfg, **kwargs):  # type: ignore
-                return make_kimi_npc(name, persona, model_cfg, **kwargs)
+    from src.agent.adapter import build_kimi_agent as build_agent  # type: ignore
 
     try:
         asyncio.run(
@@ -3103,16 +3070,8 @@ async def _start_game_server_mode(
                 pass
 
     def build_agent(name, persona, model_cfg, **kwargs):
-        try:
-            from agent.adapter import build_kimi_agent
-        except Exception:
-            try:
-                from src.agent.adapter import build_kimi_agent  # type: ignore
-            except Exception:
-                build_kimi_agent = None  # type: ignore
-        if build_kimi_agent is not None:  # type: ignore
-            return build_kimi_agent(name, persona, model_cfg, **kwargs)  # type: ignore
-        return make_kimi_npc(name, persona, model_cfg, **kwargs)
+        from src.agent.adapter import build_kimi_agent  # type: ignore
+        return build_kimi_agent(name, persona, model_cfg, **kwargs)  # type: ignore
 
     async def _runner() -> None:
         try:
@@ -3300,13 +3259,8 @@ async def _start_game_for(
                 pass
 
     def build_agent(name, persona, model_cfg, **kwargs):
-        try:
-            from agent.adapter import build_kimi_agent
-        except Exception:
-            build_kimi_agent = None  # type: ignore
-        if build_kimi_agent is not None:  # type: ignore
-            return build_kimi_agent(name, persona, model_cfg, **kwargs)  # type: ignore
-        return make_kimi_npc(name, persona, model_cfg, **kwargs)
+        from src.agent.adapter import build_kimi_agent  # type: ignore
+        return build_kimi_agent(name, persona, model_cfg, **kwargs)  # type: ignore
 
     async def _runner() -> None:
         try:
