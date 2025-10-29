@@ -984,6 +984,30 @@ def render_reach_preview_for(name: str) -> ToolResponse:
     """
     nm = str(name)
     lines: List[str] = [_REACH_RULE_LINE]
+
+    # Scene scoping: only show units that are in the same scene as the actor.
+    # If the actor's scene cannot be resolved, return only the rule line to avoid
+    # leaking cross-scene targets/noise.
+    cur_scene_id: Optional[str] = None
+    try:
+        sc = (WORLD.scene_of or {}).get(nm)
+        if isinstance(sc, str) and sc:
+            cur_scene_id = str(sc)
+    except Exception:
+        cur_scene_id = None
+    keep: Set[str] = set()
+    if cur_scene_id:
+        try:
+            for _nm, _sc in (WORLD.scene_of or {}).items():
+                if str(_sc) == cur_scene_id:
+                    keep.add(str(_nm))
+        except Exception:
+            keep = set()
+    else:
+        return ToolResponse(
+            content=[TextBlock(type="text", text="\n".join(lines))],
+            metadata={"ok": True, "actor": nm, "scene_id": None},
+        )
     # Relation lookup: nm->other
     rel_map: Dict[str, int] = {}
     try:
@@ -1022,6 +1046,9 @@ def render_reach_preview_for(name: str) -> ToolResponse:
         adj = list(list_adjacent_units(nm))
     except Exception:
         adj = []
+    # Filter adjacency to same-scene units only
+    if keep:
+        adj = [(n, d) for n, d in adj if n in keep]
     if adj:
         try:
             react_avail = bool(reaction_available(nm))
@@ -1055,6 +1082,9 @@ def render_reach_preview_for(name: str) -> ToolResponse:
             items = list(reachable_targets_for_weapon(nm, wid))
         except Exception:
             items = []
+        # Filter weapon targets to same-scene units only
+        if keep and items:
+            items = [(n, d) for n, d in items if n in keep]
         if not items:
             continue
         parts = [_fmt_with_rel(n, d) for n, d in items]
@@ -1072,7 +1102,8 @@ def render_reach_preview_for(name: str) -> ToolResponse:
 
     # Arts preview
     try:
-        ch = dict((snap.get("characters") or {}).get(nm, {}) or {})
+        # Use world state directly for known arts; preview text itself is scene-scoped via `keep`
+        ch = dict((WORLD.characters or {}).get(nm, {}) or {})
         known = list((ch.get("coc") or {}).get("arts_known") or [])
         arts_defs = get_arts_defs() if callable(get_arts_defs) else {}
         for aid in known:
@@ -1082,6 +1113,9 @@ def render_reach_preview_for(name: str) -> ToolResponse:
                 items = list(reachable_targets_for_art(nm, str(aid)))
             except Exception:
                 items = []
+            # Filter arts targets to same-scene units only
+            if keep and items:
+                items = [(n, d) for n, d in items if n in keep]
             if not items:
                 continue
             parts = [_fmt_with_rel(n, d) for n, d in items]

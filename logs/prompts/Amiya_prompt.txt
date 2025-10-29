@@ -19,39 +19,17 @@
 
 === MEMORY MESSAGES (in order) ===
 --- [env] ---
-现在：地点 旧城区·广场；时间 08:00；天气 overcast
-环境细节：鸽子受惊；中心雕像残缺；石板缝里长着野草
+现在：地点 旧城区·北侧仓棚；时间 08:00；天气 overcast
+环境细节：铁梁回声震耳；木箱凌乱堆叠
 目标：穿过仓棚南门(pending); 在广场与敌对接触(pending)
-坐标：Amiya(10, 5); Mephisto(10, 1); Doctor(12, 2); Faust(12, 2)
-角色：Amiya(HP 10/10); Mephisto(HP 11/11); Doctor(HP 11/11); Faust(HP 12/12)
-入口：广场北口 @ (10,5)（通往旧城区·北侧仓棚），距你0步
-
---- [recap] ---
-回顾
-刚才...：
-- Faust: 我抬弩贴肩，指节扣紧滑车，寒铁箭镞映出博士举刀的影子。
-- Faust: 一步不退，弩弦在闷雷般的阴空下发出极轻的颤音。
-- Faust[tool]: 对抗：Faust(Firearms_Rifle_Crossbow)[fail] vs Doctor(Dodge)[fail] -> Doctor 胜
-- Doctor: 你哪来的未知术式？
-- Doctor: 我压低兜帽，左手反握短刀，目光掠过Faust的弩弦与Mephisto尚未散尽的法术余光。
-- Doctor[tool]: 对抗：Doctor(Fighting_Blade)[regular] vs Faust(Dodge)[extreme] -> Faust 胜
+坐标：Amiya(0, 1); Doctor(0, 0)
+角色：Amiya(HP 10/10); Doctor(HP 11/11)
+入口：仓棚南门 @ (10,0)（通往旧城区·广场），距你11步
 
 --- [reach_preview] ---
 作战规则：只能对reach_preview的“可及目标”使用 perform_attack。
+相邻（≤1步）（反应：可用）：Doctor(1步; 挚友)
 可及武器（amiya_focus，触及 6步）：刻印导路，令术式在指尖成形。
-可用目标：Mephisto(4步; 死敌), Doctor(5步; 挚友), Faust(5步; 死敌)
-
---- [private] ---
-优先处理对白（仅你可见）：
-- 说话者：Doctor
-- 内容：我压低兜帽，左手反握短刀，目光掠过Faust的弩弦与Mephisto尚未散尽的法术余光。
-- 你对该角色的关系：+85（挚友）
-回合资源（仅你可见）：
-- 移动：5/5 步
-- 动作：可用；附赠动作：可用；反应：可用
-作战规则：只能对reach_preview的“可及目标”使用 perform_attack。
-有效行动要求：存在敌对关系时，每回合必须进行一次有效行动；对超出触及范围的 perform_attack 视为无效。
-距离提示（仅你可见）：
-- Mephisto：4步
-- Doctor：5步
-- Faust：5步
+可用目标：Doctor(1步; 挚友)
+可及术式（amiya_binding，触及 6步）：念线缠体，造成轻伤，并使目标短暂束缚（禁止移动与攻击）。
+可用目标：Doctor(1步; 挚友)

@@ -1894,7 +1894,15 @@ async def npc_ephemeral_say(
         except Exception:
             pass
     try:
-        out = await ephemeral(None)
+        # Use adapter entrypoint to decouple call site from backend details
+        try:
+            from agent.adapter import ask_once
+        except Exception:
+            try:
+                from src.agent.adapter import ask_once  # type: ignore
+            except Exception:
+                ask_once = None  # type: ignore
+        out = await (ask_once(ephemeral) if ask_once else ephemeral(None))
     except Exception as exc:
         # Emit a clear error event for frontend diagnostics
         try:
@@ -2764,9 +2772,16 @@ def main() -> None:
     # Inject the port (adapter) so actions depend on a stable surface
     tool_list, tool_dispatch = make_npc_actions(world=world)
 
-    # Agent builder
-    def build_agent(name, persona, model_cfg, **kwargs):
-        return make_kimi_npc(name, persona, model_cfg, **kwargs)
+    # Agent builder: delegate to adapter so only one place knows model plumbing
+    try:
+        from agent.adapter import build_kimi_agent as build_agent  # type: ignore
+    except Exception:
+        try:
+            from src.agent.adapter import build_kimi_agent as build_agent  # type: ignore
+        except Exception:
+            # Fallback to local factory if adapter is unavailable
+            def build_agent(name, persona, model_cfg, **kwargs):  # type: ignore
+                return make_kimi_npc(name, persona, model_cfg, **kwargs)
 
     try:
         asyncio.run(
@@ -3088,6 +3103,15 @@ async def _start_game_server_mode(
                 pass
 
     def build_agent(name, persona, model_cfg, **kwargs):
+        try:
+            from agent.adapter import build_kimi_agent
+        except Exception:
+            try:
+                from src.agent.adapter import build_kimi_agent  # type: ignore
+            except Exception:
+                build_kimi_agent = None  # type: ignore
+        if build_kimi_agent is not None:  # type: ignore
+            return build_kimi_agent(name, persona, model_cfg, **kwargs)  # type: ignore
         return make_kimi_npc(name, persona, model_cfg, **kwargs)
 
     async def _runner() -> None:
@@ -3276,6 +3300,12 @@ async def _start_game_for(
                 pass
 
     def build_agent(name, persona, model_cfg, **kwargs):
+        try:
+            from agent.adapter import build_kimi_agent
+        except Exception:
+            build_kimi_agent = None  # type: ignore
+        if build_kimi_agent is not None:  # type: ignore
+            return build_kimi_agent(name, persona, model_cfg, **kwargs)  # type: ignore
         return make_kimi_npc(name, persona, model_cfg, **kwargs)
 
     async def _runner() -> None:

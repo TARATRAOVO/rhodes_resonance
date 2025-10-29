@@ -392,6 +392,60 @@
         }
         ctx.restore();
       }
+      _drawEntrances(state, bounds, stepPx, focusScene) {
+        // Draw scene entrances as diamond markers with labels.
+        const ctx = this.ctx; if (!ctx) return;
+        const pad = 24;
+        const originX = pad - bounds.minX * stepPx;
+        const originY = pad - bounds.minY * stepPx;
+        const ents = state.entrances || {};
+        const scenes = state.scenes || {};
+
+        ctx.save();
+        ctx.font = '11px ui-monospace, Menlo, monospace';
+        ctx.textBaseline = 'middle';
+        for (const [eid, e] of Object.entries(ents)) {
+          try {
+            const from = String((e || {}).from_scene || '');
+            if (focusScene && from !== String(focusScene)) continue; // only draw in-focus scene
+            const at = (e || {}).at;
+            if (!Array.isArray(at) || at.length < 2) continue;
+            const gx = parseInt(at[0], 10);
+            const gy = parseInt(at[1], 10);
+            if (!Number.isFinite(gx) || !Number.isFinite(gy)) continue;
+
+            const x = originX + gx * stepPx;
+            const y = originY + gy * stepPx;
+
+            // Diamond marker (rotated square)
+            const size = Math.max(6, Math.min(10, stepPx * 0.6));
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(Math.PI / 4);
+            ctx.fillStyle = '#d97706';       // amber-ish color for entrances
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            const half = size / 1.4;
+            ctx.beginPath();
+            ctx.rect(-half, -half, size, size);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+
+            // Label: "label → to_scene_name"
+            const label = String((e || {}).label || '');
+            const toId = String((e || {}).to_scene || '');
+            const toName = String(((scenes[toId] || {}).name || toId));
+            const text = label ? `${label} → ${toName}` : `→ ${toName}`;
+            ctx.fillStyle = this.theme.text || '#383838';
+            ctx.fillText(text, x + size * 0.9 + 4, y);
+          } catch (_e) {
+            // be defensive; skip malformed entries
+            continue;
+          }
+        }
+        ctx.restore();
+      }
       _drawActors(state, bounds, stepPx) {
         const ctx = this.ctx; if (!ctx) return;
         const pad = 24;
@@ -454,9 +508,26 @@
             posView = posAll;
           }
         }
-        const b = this._computeBounds(posView);
+        // Also include entrance coordinates when computing bounds so we can
+        // draw entrances even if no actors are present in the focus scene.
+        const entsAll = (st.entrances || {});
+        const entPoints = [];
+        for (const [eid, e] of Object.entries(entsAll)) {
+          try {
+            const from = String((e || {}).from_scene || '');
+            if (focusScene && from !== String(focusScene)) continue;
+            const at = (e || {}).at;
+            if (!Array.isArray(at) || at.length < 2) continue;
+            const gx = parseInt(at[0], 10);
+            const gy = parseInt(at[1], 10);
+            if (Number.isFinite(gx) && Number.isFinite(gy)) entPoints.push([gx, gy]);
+          } catch (_e) { /* ignore */ }
+        }
+        const posForBounds = Object.assign({}, posView);
+        entPoints.forEach((xy, i) => { posForBounds[`__ent_${i}`] = xy; });
+        const b = this._computeBounds(posForBounds);
         if (!b) {
-          if (this.hint) this.hint.textContent = '暂无坐标';
+          if (this.hint) this.hint.textContent = '暂无坐标/入口';
           return;
         }
         if (this.hint) this.hint.textContent = '';
@@ -467,6 +538,8 @@
         this._drawGrid(b, stepPx);
         // Render only filtered positions
         const stateView = Object.assign({}, st, { positions: posView });
+        // Draw entrances for the focus scene before actors
+        this._drawEntrances(stateView, b, stepPx, focusScene);
         this._drawActors(stateView, b, stepPx);
       }
       update(state) { this.render(state); }
