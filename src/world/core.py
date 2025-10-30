@@ -215,6 +215,11 @@ class World:
     scenes: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     entrances: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     scene_of: Dict[str, str] = field(default_factory=dict)
+    # --- Endings (multi-rule) ---
+    # Normalized endings definitions loaded from story config
+    endings_defs: List[Dict[str, Any]] = field(default_factory=list)
+    # Frozen result once an ending is reached; None when not ended yet
+    ending_state: Optional[Dict[str, Any]] = None
 
     def _touch(self) -> None:
         try:
@@ -289,6 +294,62 @@ def _normalize_scene_cfg(sc: Optional[Dict[str, Any]]):
         if isinstance(sc.get("weather"), str) and sc["weather"].strip():
             weather = sc["weather"].strip()
     return name, objectives, details, weather, time_min
+
+
+# ---- Ending config helpers ----
+def _parse_time_to_min(v: Any) -> Optional[int]:
+    try:
+        if isinstance(v, (int, float)):
+            iv = int(v)
+            return iv if iv >= 0 else None
+        if isinstance(v, str) and v.strip():
+            s = v.strip()
+            m = re.match(r"^(\d{1,2}):(\d{2})$", s)
+            if m:
+                hh, mm = int(m.group(1)), int(m.group(2))
+                if 0 <= hh < 24 and 0 <= mm < 60:
+                    return hh * 60 + mm
+            # Allow plain integer strings as minutes
+            if s.isdigit():
+                return int(s)
+    except Exception:
+        return None
+    return None
+
+
+def _normalize_endings_list(defs: Any) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    if not isinstance(defs, list):
+        return out
+    for item in defs:
+        if not isinstance(item, dict):
+            continue
+        d: Dict[str, Any] = {}
+        try:
+            d["id"] = str(item.get("id") or "").strip() or None
+        except Exception:
+            d["id"] = None
+        try:
+            d["label"] = str(item.get("label") or "").strip() or None
+        except Exception:
+            d["label"] = None
+        try:
+            oc = str(item.get("outcome") or "").strip().lower()
+            d["outcome"] = oc if oc in {"success", "failure", "neutral"} else None
+        except Exception:
+            d["outcome"] = None
+        try:
+            pr = int(item.get("priority"))
+        except Exception:
+            pr = 0
+        d["priority"] = pr
+        # when-clause may be dict (tree) or list -> treat list as any
+        w = item.get("when")
+        if isinstance(w, list):
+            w = {"any": list(w)}
+        d["when"] = w if isinstance(w, (dict, list)) else None
+        out.append(d)
+    return out
 
 
 def init_world_from_configs(*, selected_story_id: Optional[str] = None, reset: bool = True) -> dict:
@@ -427,6 +488,14 @@ def init_world_from_configs(*, selected_story_id: Optional[str] = None, reset: b
             WORLD.entrances = {str(k): dict(v or {}) for k, v in ent_map.items()}
     except Exception:
         pass
+    # Endings (optional)
+    try:
+        ends = story.get("endings") if isinstance(story, dict) else None
+        WORLD.endings_defs = _normalize_endings_list(ends)
+        WORLD.ending_state = None
+    except Exception:
+        WORLD.endings_defs = []
+        WORLD.ending_state = None
     try:
         init_scenes = story.get("initial_scenes") if isinstance(story, dict) else None
         if isinstance(init_scenes, dict):
@@ -3831,6 +3900,14 @@ def process_events():
                     damage(str(eff.get("target")), int(eff.get("amount", 0)))
                 elif kind == "heal":
                     heal(str(eff.get("target")), int(eff.get("amount", 0)))
+                elif kind == "end":
+                    # Allow timeline events to force an ending
+                    eid = eff.get("ending_id")
+                    note = eff.get("note") or eff.get("message") or ""
+                    try:
+                        end_now(str(eid) if eid is not None else None, note=str(note))
+                    except Exception:
+                        pass
             except Exception:
                 outputs.append(TextBlock(type="text", text=f"[事件执行失败] {eff}"))
     if outputs:
@@ -3849,6 +3926,300 @@ def add_mark(text: str):
         if len(WORLD.marks) > 10:
             WORLD.marks = WORLD.marks[-10:]
     return ToolResponse(content=[TextBlock(type="text", text=f"(环境刻痕)+{s}")], metadata={"marks": list(WORLD.marks)})
+
+
+# ---- Endings evaluation ----
+
+def set_endings(defs: List[Dict[str, Any]]) -> ToolResponse:
+    """Replace endings table with a normalized list and clear any previous result."""
+    WORLD.endings_defs = _normalize_endings_list(defs)
+    WORLD.ending_state = None
+    WORLD._touch()
+    return ToolResponse(
+        content=[TextBlock(type="text", text=f"载入结局规则：{len(WORLD.endings_defs)} 项")],
+        metadata={"ok": True, "count": len(WORLD.endings_defs)},
+    )
+
+
+def _alive(name: str) -> bool:
+    try:
+        st = WORLD.characters.get(str(name), {}) or {}
+        hp = int(st.get("hp", 0))
+        dying = st.get("dying_turns_left") is not None
+        return hp > 0 and not dying
+    except Exception:
+        return False
+
+
+def _eval_when(node: Any) -> tuple[bool, List[str]]:
+    """Evaluate a when-clause recursively and return (matched, reasons)."""
+    reasons: List[str] = []
+    # Logical composition
+    if isinstance(node, dict):
+        if "all" in node:
+            parts = node.get("all")
+            if not isinstance(parts, list):
+                return False, []
+            acc = True
+            all_reasons: List[str] = []
+            for p in parts:
+                ok, rs = _eval_when(p)
+                if ok:
+                    all_reasons.extend(rs)
+                else:
+                    acc = False
+            return acc, (all_reasons if acc else [])
+        if "any" in node:
+            parts = node.get("any")
+            if not isinstance(parts, list):
+                return False, []
+            any_reasons: List[str] = []
+            for p in parts:
+                ok, rs = _eval_when(p)
+                if ok:
+                    any_reasons.extend(rs)
+                    return True, any_reasons
+            return False, []
+        if "not" in node:
+            ok, _ = _eval_when(node.get("not"))
+            return (not ok), ([] if ok else ["not"])  # minimal reason
+
+        # Leaf conditions
+        # 1) objectives
+        if "objectives" in node:
+            spec = node.get("objectives") or {}
+            if not isinstance(spec, dict):
+                return False, []
+            names = spec.get("names")
+            require = str(spec.get("require", "all")).lower()
+            status = str(spec.get("status", "done")).lower()
+            objs = list(WORLD.objectives or [])
+            status_map = dict(WORLD.objective_status or {})
+            target_names = [str(n) for n in (names or objs)] if names else objs
+            if not target_names:
+                return False, []
+            def _match_one(nm: str) -> bool:
+                st = str(status_map.get(str(nm), "pending")).lower()
+                return (status == "any") or (st == status)
+            vals = [_match_one(n) for n in target_names]
+            ok = all(vals) if require == "all" else any(vals)
+            if ok:
+                reasons.append(
+                    f"目标{('全部' if require=='all' else '部分')}达成(status={status})"
+                )
+            return ok, reasons
+
+        # 2) time gates
+        if "time_before" in node or "time_at_least" in node:
+            if "time_before" in node:
+                t = _parse_time_to_min(node.get("time_before"))
+                if t is None:
+                    return False, []
+                ok = int(WORLD.time_min) < int(t)
+                if ok:
+                    reasons.append(f"时间早于{t}分钟")
+                return ok, reasons
+            if "time_at_least" in node:
+                t = _parse_time_to_min(node.get("time_at_least"))
+                if t is None:
+                    return False, []
+                ok = int(WORLD.time_min) >= int(t)
+                if ok:
+                    reasons.append(f"时间不早于{t}分钟")
+                return ok, reasons
+
+        # 3) actors_alive / actors_dead
+        if "actors_alive" in node or "actors_dead" in node:
+            key = "actors_alive" if "actors_alive" in node else "actors_dead"
+            spec = node.get(key) or {}
+            if not isinstance(spec, dict):
+                return False, []
+            names = [str(n) for n in (spec.get("names") or [])]
+            require = str(spec.get("require", "all")).lower()
+            if not names:
+                return False, []
+            vals = [(_alive(n) if key == "actors_alive" else (not _alive(n))) for n in names]
+            ok = all(vals) if require == "all" else any(vals)
+            if ok:
+                reasons.append(
+                    ("角色存活:" if key == "actors_alive" else "角色死亡:") + ", ".join(names)
+                )
+            return ok, reasons
+
+        # 4) participants alive counts
+        if "participants_alive_at_least" in node or "participants_alive_at_most" in node:
+            try:
+                cur = [n for n in (WORLD.participants or []) if _alive(n)]
+            except Exception:
+                cur = []
+            if "participants_alive_at_least" in node:
+                try:
+                    need = int(node.get("participants_alive_at_least"))
+                except Exception:
+                    need = None
+                ok = (need is not None) and (len(cur) >= int(need))
+                if ok:
+                    reasons.append(f"存活参与者≥{need}")
+                return ok, reasons
+            if "participants_alive_at_most" in node:
+                try:
+                    cap = int(node.get("participants_alive_at_most"))
+                except Exception:
+                    cap = None
+                ok = (cap is not None) and (len(cur) <= int(cap))
+                if ok:
+                    reasons.append(f"存活参与者≤{cap}")
+                return ok, reasons
+
+        # 5) hostiles_present gate
+        if "hostiles_present" in node:
+            val = node.get("hostiles_present")
+            thr = None
+            if isinstance(val, dict):
+                try:
+                    thr = int(val.get("threshold"))
+                except Exception:
+                    thr = None
+                want = bool(val.get("value", True))
+            else:
+                want = bool(val)
+            hp = hostiles_present(WORLD.participants or None, threshold=(thr if thr is not None else -10))
+            ok = (hp is True) if want else (hp is False)
+            if ok:
+                reasons.append("敌对存在" if want else "已清场")
+            return ok, reasons
+
+        # 6) marks_contains
+        if "marks_contains" in node:
+            val = node.get("marks_contains")
+            marks = list(WORLD.marks or [])
+            if isinstance(val, str):
+                ok = val in marks
+                if ok:
+                    reasons.append(f"刻痕包含：{val}")
+                return ok, reasons
+            if isinstance(val, list):
+                # require any by default
+                ok = any(str(x) in marks for x in val)
+                if ok:
+                    reasons.append("刻痕命中任一")
+                return ok, reasons
+            return False, []
+
+        # 7) tension gate
+        if "tension_at_least" in node or "tension_at_most" in node:
+            try:
+                tv = int(WORLD.tension)
+            except Exception:
+                tv = 0
+            if "tension_at_least" in node:
+                try:
+                    need = int(node.get("tension_at_least"))
+                except Exception:
+                    need = None
+                ok = (need is not None) and (tv >= int(need))
+                if ok:
+                    reasons.append(f"气氛≥{need}")
+                return ok, reasons
+            if "tension_at_most" in node:
+                try:
+                    cap = int(node.get("tension_at_most"))
+                except Exception:
+                    cap = None
+                ok = (cap is not None) and (tv <= int(cap))
+                if ok:
+                    reasons.append(f"气氛≤{cap}")
+                return ok, reasons
+
+        # 8) location_is
+        if "location_is" in node:
+            val = node.get("location_is")
+            loc = str(WORLD.location or "")
+            if isinstance(val, str):
+                ok = (loc == val)
+                if ok:
+                    reasons.append(f"地点={val}")
+                return ok, reasons
+            if isinstance(val, list):
+                ok = any(loc == str(x) for x in val)
+                if ok:
+                    reasons.append("地点命中")
+                return ok, reasons
+            return False, []
+
+    # Unknown/unhandled clause -> no match
+    return False, []
+
+
+def evaluate_endings() -> ToolResponse:
+    """Evaluate all configured endings and cache the first matching result.
+
+    Returns ToolResponse with metadata: { ok, ended, ending_id?, label?, outcome?, reasons, matched_ids }
+    """
+    # If already ended, keep it stable
+    if WORLD.ending_state and bool(WORLD.ending_state.get("ended")):
+        return ToolResponse(content=[], metadata=dict(WORLD.ending_state))
+
+    defs = list(WORLD.endings_defs or [])
+    if not defs:
+        return ToolResponse(content=[], metadata={"ok": True, "ended": False, "matched_ids": []})
+    # Sort by priority desc, keep original order for ties
+    defs.sort(key=lambda d: int(d.get("priority", 0) or 0), reverse=True)
+    matched: List[str] = []
+    for d in defs:
+        cond = d.get("when")
+        ok, reasons = _eval_when(cond)
+        if ok:
+            eid = d.get("id") or ""
+            matched.append(str(eid))
+            # Freeze outcome
+            st = {
+                "ok": True,
+                "ended": True,
+                "ending_id": (str(eid) or None),
+                "label": (d.get("label") or None),
+                "outcome": (d.get("outcome") or None),
+                "reasons": reasons,
+                "time_min": int(WORLD.time_min),
+            }
+            WORLD.ending_state = dict(st)
+            WORLD._touch()
+            return ToolResponse(content=[TextBlock(type="text", text=f"结局触发：{d.get('label') or d.get('id') or ''}")], metadata={**st, "matched_ids": matched})
+    return ToolResponse(content=[], metadata={"ok": True, "ended": False, "matched_ids": matched})
+
+
+def story_ended() -> Dict[str, Any]:
+    """Lightweight query for main/orchestrator to check end-state.
+
+    - If ended already, return frozen WORLD.ending_state
+    - Else, evaluate once and return the result
+    """
+    if WORLD.ending_state and bool(WORLD.ending_state.get("ended")):
+        return dict(WORLD.ending_state)
+    res = evaluate_endings()
+    return dict(res.metadata or {})
+
+
+def end_now(ending_id: Optional[str] = None, note: str = "") -> ToolResponse:
+    """Force an immediate ending with an optional id/label note.
+
+    Idempotent: if already ended, returns the existing result.
+    """
+    if WORLD.ending_state and bool(WORLD.ending_state.get("ended")):
+        return ToolResponse(content=[], metadata=dict(WORLD.ending_state))
+    eid = str(ending_id).strip() if ending_id is not None else ""
+    st = {
+        "ok": True,
+        "ended": True,
+        "ending_id": (eid or None),
+        "label": (note or None),
+        "outcome": None,
+        "reasons": ([note] if note else []),
+        "time_min": int(WORLD.time_min),
+    }
+    WORLD.ending_state = dict(st)
+    WORLD._touch()
+    return ToolResponse(content=[TextBlock(type="text", text=f"结局触发：{eid or '(manual)'}")], metadata=st)
 
 
 # ============================================================

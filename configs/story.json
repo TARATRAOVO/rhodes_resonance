@@ -36,7 +36,67 @@
         ],
         "time": "08:00",
         "weather": "overcast"
-      }
+      },
+      "endings": [
+        {
+          "id": "party_wiped",
+          "label": "全员战败",
+          "outcome": "failure",
+          "priority": 100,
+          "when": {
+            "any": [
+              {
+                "actors_dead": {
+                  "names": [
+                    "Doctor"
+                  ],
+                  "require": "any"
+                }
+              },
+              {
+                "participants_alive_at_most": 0
+              }
+            ]
+          }
+        },
+        {
+          "id": "conflict_resolved",
+          "label": "冲突终结",
+          "outcome": "success",
+          "priority": 90,
+          "when": {
+            "all": [
+              {
+                "objectives": {
+                  "names": [
+                    "冲突终结"
+                  ],
+                  "require": "all",
+                  "status": "done"
+                }
+              },
+              {
+                "actors_alive": {
+                  "names": [
+                    "Doctor",
+                    "Amiya"
+                  ],
+                  "require": "all"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "out_of_time",
+          "label": "时间耗尽",
+          "outcome": "neutral",
+          "priority": 10,
+          "when": {
+            "time_at_least": "09:00"
+          }
+        }
+      ]
     },
     "001_entrance_demo": {
       "meta": {
@@ -131,7 +191,71 @@
           "穿过仓棚南门",
           "在广场与敌对接触"
         ]
-      }
+      },
+      "endings": [
+        {
+          "id": "party_wiped",
+          "label": "全员战败",
+          "outcome": "failure",
+          "priority": 100,
+          "when": {
+            "any": [
+              {
+                "actors_dead": {
+                  "names": [
+                    "Doctor"
+                  ],
+                  "require": "any"
+                }
+              },
+              {
+                "participants_alive_at_most": 0
+              }
+            ]
+          }
+        },
+        {
+          "id": "reach_plaza",
+          "label": "抵达广场并接触",
+          "outcome": "success",
+          "priority": 90,
+          "when": {
+            "all": [
+              {
+                "objectives": {
+                  "names": [
+                    "穿过仓棚南门",
+                    "在广场与敌对接触"
+                  ],
+                  "require": "all",
+                  "status": "done"
+                }
+              },
+              {
+                "location_is": "旧城区·广场"
+              },
+              {
+                "actors_alive": {
+                  "names": [
+                    "Doctor",
+                    "Amiya"
+                  ],
+                  "require": "all"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "timeout",
+          "label": "耽误时机",
+          "outcome": "neutral",
+          "priority": 10,
+          "when": {
+            "time_at_least": "08:30"
+          }
+        }
+      ]
     }
   }
 }

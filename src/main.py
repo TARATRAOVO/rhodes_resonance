@@ -1013,6 +1013,10 @@ class _WorldPort:
     render_reach_preview_for = staticmethod(
         getattr(world_impl, "render_reach_preview_for", lambda *a, **k: None)
     )
+    # endings
+    story_ended = staticmethod(getattr(world_impl, "story_ended", lambda: {"ended": False}))
+    evaluate_endings = staticmethod(getattr(world_impl, "evaluate_endings", lambda: {"ok": True, "ended": False}))
+    set_endings = staticmethod(getattr(world_impl, "set_endings", lambda defs: None))
 
 
     @staticmethod
@@ -1465,6 +1469,18 @@ async def _execute_actions_from_json(
             emit_turn_state(ctx)
         except Exception:
             pass
+        # Check for story ending after each tool result
+        try:
+            end_res = ctx.world.story_ended() if hasattr(ctx.world, "story_ended") else {}
+        except Exception:
+            end_res = {}
+        if isinstance(end_res, dict) and end_res.get("ended"):
+            # Broadcast an ending system message and stop further actions
+            try:
+                ctx.emit("system", actor="Host", phase="ending", data={"ending": end_res})
+            except Exception:
+                pass
+            return
 
 
 def _parse_story_positions(raw: Any, target: Dict[str, Tuple[int, int]]) -> None:
@@ -2636,6 +2652,20 @@ async def run_demo(
                     phase="actor-turn",
                     data={"round": current_round},
                 )
+
+                # Ending check at actor-turn boundary
+                try:
+                    end_res = ctx.world.story_ended() if hasattr(ctx.world, "story_ended") else {}
+                except Exception:
+                    end_res = {}
+                if isinstance(end_res, dict) and end_res.get("ended"):
+                    try:
+                        ctx.emit("system", actor="Host", phase="ending", data={"ending": end_res})
+                    except Exception:
+                        pass
+                    end_reason = str((end_res.get("label") or end_res.get("ending_id") or "剧情结束")).strip() or "剧情结束"
+                    combat_cleared = True
+                    break
 
                 # Soft pause: if a pause was requested, block here (between actors)
                 if pause_gate is not None:
