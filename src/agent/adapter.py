@@ -15,6 +15,7 @@ from typing import Any, Mapping, Optional, List, Union
 from pathlib import Path
 from datetime import datetime, timezone
 import os
+import json
 
 try:  # optional at import time; unit tests may not install agentscope
     from agentscope.agent import ReActAgent  # type: ignore
@@ -120,11 +121,19 @@ class _LoggingModelWrapper:
                 pass
             path = dump_dir / f"{safe}_payload.json"
             try:
-                import json
                 with path.open("w", encoding="utf-8") as f:
                     json.dump(record, f, ensure_ascii=False, indent=2)
             except Exception:
                 # never break the call if logging fails
+                pass
+
+            # Additionally write a human-friendly .txt alongside the JSON.
+            # This file must not add or omit information; it only re-formats
+            # what is already present in `record` for easier reading.
+            try:
+                self._dump_payload_pretty(record, dump_dir / f"{safe}_payload.txt")
+            except Exception:
+                # pretty log failure must not affect runtime
                 pass
         except Exception:
             # keep silent on logging errors
@@ -142,6 +151,110 @@ class _LoggingModelWrapper:
     async def agenerate(self, *args, **kwargs):  # async entrypoint
         self._dump_payload(args, kwargs)
         return await self._model.agenerate(*args, **kwargs)
+
+    # --- helpers for human-readable payload log ---
+    def _dump_payload_pretty(self, record: dict, out_path: Path) -> None:
+        """Write a strictly re-formatted, human-readable view of the payload.
+
+        No fields are added or removed. Strings are shown verbatim; compound
+        values are pretty-printed JSON. This is intended only as a companion
+        to the JSON payload file for quick inspection.
+        """
+
+        def _w(fp, s: str = "") -> None:
+            fp.write((s or "") + "\n")
+
+        def _indent_lines(text: Any, pad: str) -> str:
+            """Indent a possibly multi-line string.
+
+            Additionally, improve readability by treating literal "\\n" (and
+            common variants) as visual line breaks. This does not change the
+            underlying JSON record (which is emitted verbatim below).
+            """
+            s = "" if text is None else str(text)
+            if not s:
+                return ""
+            try:
+                # Normalize common escaped line breaks for display only
+                s = s.replace("\r\n", "\n")
+                s = s.replace("\\n", "\n")  # literal backslash-n -> newline
+                s = s.replace("/n", "\n")     # tolerate accidental "/n"
+            except Exception:
+                pass
+            return "\n".join(pad + ln for ln in s.splitlines())
+
+        def _pjson(obj: Any, indent: int = 2) -> str:
+            return json.dumps(obj, ensure_ascii=False, indent=indent)
+
+        meta = record.get("meta", {}) or {}
+        messages = record.get("messages", None)
+        kwargs = record.get("kwargs", {}) or {}
+
+        with out_path.open("w", encoding="utf-8") as f:
+            # meta
+            _w(f, f"actor: {meta.get('actor', '')}")
+            _w(f, f"timestamp: {meta.get('timestamp', '')}")
+            if meta.get("model_name") is not None:
+                _w(f, f"model_name: {meta.get('model_name')}")
+            if meta.get("client_args") is not None:
+                _w(f, "client_args:")
+                _w(f, _indent_lines(_pjson(meta.get("client_args")), "  "))
+            if meta.get("generate_kwargs") is not None:
+                _w(f, "generate_kwargs:")
+                _w(f, _indent_lines(_pjson(meta.get("generate_kwargs")), "  "))
+
+            # messages
+            _w(f)
+            _w(f, "messages:")
+            if messages is None:
+                _w(f, "  <none>")
+            else:
+                for i, m in enumerate(messages, start=1):
+                    if not isinstance(m, dict):
+                        _w(f, f"- [{i}] <non-dict>:")
+                        _w(f, _indent_lines(_pjson(m), "    "))
+                        continue
+                    role = m.get("role", "")
+                    name = m.get("name", "")
+                    _w(f, f"- [{i}] role: {role}  name: {name}")
+                    if "content" in m:
+                        c = m.get("content")
+                        if isinstance(c, str):
+                            _w(f, "    content:")
+                            _w(f, _indent_lines(c, "      "))
+                        else:
+                            _w(f, "    content(json):")
+                            _w(f, _indent_lines(_pjson(c), "      "))
+                    for k, v in m.items():
+                        if k in ("role", "name", "content"):
+                            continue
+                        _w(f, f"    {k}:")
+                        if isinstance(v, (dict, list)):
+                            _w(f, _indent_lines(_pjson(v), "      "))
+                        elif v is None:
+                            _w(f, "      null")
+                        else:
+                            _w(f, _indent_lines(v, "      "))
+
+            # kwargs
+            _w(f)
+            _w(f, "kwargs:")
+            if not kwargs:
+                _w(f, "  <none>")
+            else:
+                for k, v in kwargs.items():
+                    _w(f, f"- {k}:")
+                    if isinstance(v, (dict, list)):
+                        _w(f, _indent_lines(_pjson(v), "    "))
+                    elif v is None:
+                        _w(f, "    null")
+                    else:
+                        _w(f, _indent_lines(v, "    "))
+
+            # raw JSON (verbatim)
+            _w(f)
+            _w(f, "--- raw (verbatim record) ---")
+            _w(f, _pjson(record))
 
 
 def build_kimi_agent(
