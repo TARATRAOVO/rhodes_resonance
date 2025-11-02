@@ -100,18 +100,20 @@ button[disabled], .btn[disabled] { background: #ededed; color: #a7a7a7; border-c
 /* Settings drawer */
 .hidden { display:none !important; }
 .drawer { position: fixed; inset: 0; height: 100vh; display:flex; flex-direction:column; z-index: 1000;
-  /* right-side sheet look with a dimmed backdrop area on the left */
-  padding-left: clamp(18vw, 38vw, 54vw);
-  background:
-    linear-gradient(90deg, rgba(0,0,0,0) 0, rgba(0,0,0,.18) 10%, rgba(255,255,255,.92) 16%, rgba(255,255,255,1) 24%);
-  box-shadow: -24px 0 48px rgba(16,24,40,.15);
+  /* fullscreen editor */
+  padding-left: 0;
+  background: var(--bg);
+  box-shadow: none;
 }
 .drawer-head { position: sticky; top:0; display:flex; align-items:center; justify-content:space-between; padding:10px 12px; border-bottom:1px solid var(--border); background: rgba(255,255,255,0.9); backdrop-filter: blur(4px); z-index: 1; }
 .tabs { display:flex; gap:8px; }
 .tab { background: #f3f4f6; color: #111827; border:1px solid var(--border); border-radius: 0; padding:6px 12px; cursor:pointer; font-weight:600; font-size:12px; letter-spacing:.02em; text-transform:uppercase; }
 .tab.active { background: var(--bg-2); border-color: var(--border); box-shadow: 0 1px 0 rgba(16,24,40,.04); }
 .ops button.ghost { background: var(--elev); }
-.drawer-body { padding:12px; overflow:auto; flex:1; display:block; }
+.drawer-body { padding:16px; overflow:auto; flex:1; display:block; }
+/* Make wide editing tables scrollable horizontally if overflow */
+.drawer-body .tbl { display: table; width: 100%; }
+.drawer-body .tbl-wrapper { overflow:auto; }
 .lbl { display:block; font-size:12px; color: var(--muted); margin:6px 0 4px; }
 .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
 .grid2 > div { min-width:0; }

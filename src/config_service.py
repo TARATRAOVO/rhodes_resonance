@@ -114,6 +114,36 @@ class ConfigService:
                         int(v[0]); int(v[1])
                     except Exception:
                         return False, f"initial_positions.{k} coordinates must be integers"
+            # Optional: events timeline validation (lenient)
+            evs = story.get("events")
+            if evs is not None:
+                if not isinstance(evs, list):
+                    return False, "events must be an array"
+                for i, ev in enumerate(evs):
+                    if not isinstance(ev, dict):
+                        return False, f"events[{i}] must be an object"
+                    # name optional string
+                    if ev.get("name") is not None and not isinstance(ev.get("name"), str):
+                        return False, f"events[{i}].name must be string"
+                    # at (int) or time/time_min (string/int) optional
+                    if ev.get("at") is not None:
+                        try:
+                            int(ev.get("at"))
+                        except Exception:
+                            return False, f"events[{i}].at must be integer minutes"
+                    if ev.get("time") is not None and not isinstance(ev.get("time"), str):
+                        return False, f"events[{i}].time must be HH:MM string"
+                    if ev.get("time_min") is not None:
+                        try:
+                            int(ev.get("time_min"))
+                        except Exception:
+                            return False, f"events[{i}].time_min must be integer"
+                    # note optional string
+                    if ev.get("note") is not None and not isinstance(ev.get("note"), str):
+                        return False, f"events[{i}].note must be string"
+                    # effects optional list
+                    if ev.get("effects") is not None and not isinstance(ev.get("effects"), list):
+                        return False, f"events[{i}].effects must be an array"
             return True, "ok"
 
         if not isinstance(obj, dict):

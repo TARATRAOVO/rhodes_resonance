@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
     <title>Rhodes Resonance 控制台</title>
+    <link rel="icon" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/qdYtZ8AAAAASUVORK5CYII=">
     <!-- Fonts: Inter Tight (Latin) + Noto Sans SC (CJK) -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -64,6 +65,8 @@
         <div class="tabs" role="tablist">
           <button class="tab active" data-tab="story" role="tab" aria-selected="true">剧本</button>
           <button class="tab" data-tab="weapons" role="tab" aria-selected="false">武装</button>
+          <button class="tab" data-tab="arts" role="tab" aria-selected="false">术式</button>
+          <button class="tab" data-tab="timeline" role="tab" aria-selected="false">时间轴</button>
           <button class="tab" data-tab="characters" role="tab" aria-selected="false">单位</button>
         </div>
         <div class="ops">
@@ -132,6 +135,100 @@
               <input id="stPosX" type="number" placeholder="X" />
               <input id="stPosY" type="number" placeholder="Y" />
               <button id="btnAddPos" class="sm">+ 添加坐标</button>
+
+            <hr />
+            <h4 class="h">结局（endings）</h4>
+            <div class="tbl">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width:14ch">ID</th>
+                    <th style="width:16ch">标题</th>
+                    <th style="width:10ch">结果</th>
+                    <th style="width:10ch">优先级</th>
+                    <th>条件（when，JSON）</th>
+                    <th style="width:10ch">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="stEndingsBody"></tbody>
+              </table>
+              <div class="toolbar-row">
+                <button id="btnAddEnding" class="sm">新增结局</button>
+              </div>
+              <div class="dim" style="margin-top:6px">提示：条件支持 any/all/not 与叶子条件（objectives/time/actors_alive/dead/participants_alive_*/hostiles_present/marks_contains/tension_*/location_is）。暂以 JSON 填写。</div>
+            
+
+            <hr />
+            <h4 class="h">多场景与入口</h4>
+            <div class="grid2">
+              <div>
+                <label class="lbl">场景（scenes）</label>
+                <table class="tbl" id="stScenesTable">
+                  <thead><tr><th>场景ID</th><th>名称</th><th>细节数</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+                <div class="toolbar-row">
+                  <button id="btnAddScene" class="sm">+ 新增场景</button>
+                </div>
+                <div id="stSceneEditor" class="mt-6 hidden">
+                  <div class="grid2">
+                    <div>
+                      <label class="lbl">编辑场景ID</label>
+                      <input id="stSceneEditId" type="text" disabled />
+                    </div>
+                    <div>
+                      <label class="lbl">名称</label>
+                      <input id="stSceneEditName" type="text" />
+                    </div>
+                  </div>
+                  <label class="lbl">关键细节</label>
+                  <div id="stSceneEditDetails" class="list-edit"></div>
+                  <button id="btnAddSceneDetail" class="sm">+ 添加细节</button>
+                </div>
+              </div>
+              <div>
+                <label class="lbl">入口（entrances）</label>
+                <table class="tbl" id="stEntrTable">
+                  <thead><tr><th>ID</th><th>标签</th><th>from</th><th>to</th><th>atX</th><th>atY</th><th>spawnX</th><th>spawnY</th><th>描述</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+                <div class="toolbar-row">
+                  <button id="btnAddEntrance" class="sm">+ 新增入口</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid2">
+              <div>
+                <label class="lbl">初始场景（initial_scenes）</label>
+                <table class="tbl" id="stInitScenesTable">
+                  <thead><tr><th>角色</th><th>场景ID</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+                <div class="toolbar-row">
+                  <select id="stInitSceneNameSel"></select>
+                  <input id="stInitSceneId" type="text" placeholder="scene_id" />
+                  <button id="btnSetInitScene" class="sm">设置初始场景</button>
+                </div>
+              </div>
+              <div>
+                <label class="lbl">场景内坐标（scene_positions）</label>
+                <div class="toolbar-row">
+                  <select id="stScenePosSel"></select>
+                </div>
+                <table class="tbl" id="stScenePosTable">
+                  <thead><tr><th>角色</th><th>X</th><th>Y</th><th></th></tr></thead>
+                  <tbody></tbody>
+                </table>
+                <div class="toolbar-row">
+                  <select id="stScenePosNameSel"></select>
+                  <input id="stScenePosX" type="number" placeholder="X" />
+                  <input id="stScenePosY" type="number" placeholder="Y" />
+                  <button id="btnAddScenePos" class="sm">添加/更新</button>
+                </div>
+              </div>
+            </div>
+</div>
             </div>
           </div>
         </div>
@@ -152,6 +249,48 @@
             <tbody></tbody>
           </table>
           <button id="btnAddWeapon" class="sm">+ 添加武装</button>
+        </div>
+
+        <!-- Arts Tab -->
+        <div class="tabpane hidden" data-pane="arts">
+          <table class="tbl" id="artsTable">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>名称</th>
+                <th>施术检定</th>
+                <th>抗性</th>
+                <th>射程(步)</th>
+                <th>伤害</th>
+                <th>控制效果</th>
+                <th>持续</th>
+                <th>MP</th>
+                <th>标签</th>
+                <th>描述</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <button id="btnAddArt" class="sm">+ 新增术式</button>
+        </div>
+
+        <!-- Timeline Tab -->
+        <div class="tabpane hidden" data-pane="timeline">
+          <table class="tbl" id="tlTable">
+            <thead>
+              <tr>
+                <th>事件名</th>
+                <th>时间(HH:MM)</th>
+                <th>备注</th>
+                <th>效果（effects，JSON）</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <button id="btnAddEvent" class="sm">+ 新增事件</button>
+          <div class="dim" style="margin-top:6px">提示：时间轴保存在 story.json 的 stories.<ID>.events；运行时需要推进时间（advance_time）才会触发。</div>
         </div>
 
         <!-- Characters Tab (表单化) -->
@@ -215,6 +354,8 @@
                 <input id="chInvCount" type="number" placeholder="数量" />
                 <button id="btnAddInv" class="sm">+ 添加物品</button>
               </div>
+
+            
             </div>
           </div>
         </div>

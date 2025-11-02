@@ -488,6 +488,35 @@ def init_world_from_configs(*, selected_story_id: Optional[str] = None, reset: b
             WORLD.entrances = {str(k): dict(v or {}) for k, v in ent_map.items()}
     except Exception:
         pass
+    # Events (optional, loaded into WORLD.events)
+    try:
+        ev_list = story.get("events") if isinstance(story, dict) else None
+        if isinstance(ev_list, list):
+            items = []
+            for ev in ev_list:
+                if not isinstance(ev, dict):
+                    continue
+                name = str(ev.get("name") or ev.get("id") or "(事件)")
+                # Accept minutes in 'at' or time string in 'time' / 'time_min'
+                at_val = ev.get("at")
+                at_min = None
+                try:
+                    if at_val is not None:
+                        at_min = int(at_val)
+                except Exception:
+                    at_min = None
+                if at_min is None:
+                    at_min = _parse_time_to_min(ev.get("time")) or _parse_time_to_min(ev.get("time_min"))
+                if at_min is None:
+                    # fallback: use current WORLD.time_min to avoid crashes
+                    at_min = int(WORLD.time_min)
+                note = str(ev.get("note") or ev.get("message") or "")
+                effects = list(ev.get("effects") or []) if isinstance(ev.get("effects"), list) else []
+                items.append({"name": name, "at": int(at_min), "note": note, "effects": effects})
+            items.sort(key=lambda x: int(x.get("at", 0)))
+            WORLD.events = items
+    except Exception:
+        pass
     # Endings (optional)
     try:
         ends = story.get("endings") if isinstance(story, dict) else None

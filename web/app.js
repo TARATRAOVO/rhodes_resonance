@@ -38,6 +38,38 @@
   const btnAddDetail = drawer ? drawer.querySelector('#btnAddDetail') : null;
   const btnAddObjective = drawer ? drawer.querySelector('#btnAddObjective') : null;
   const btnAddPos = drawer ? drawer.querySelector('#btnAddPos') : null;
+  // Story endings editor controls
+  const stEndingsBody = drawer ? drawer.querySelector('#stEndingsBody') : null;
+  const btnAddEnding = drawer ? drawer.querySelector('#btnAddEnding') : null;
+  // Arts controls
+  const artsTable = drawer ? drawer.querySelector('#artsTable') : null;
+  const btnAddArt = drawer ? drawer.querySelector('#btnAddArt') : null;
+  // Timeline controls
+  const tlTable = drawer ? drawer.querySelector('#tlTable') : null;
+  const btnAddEvent = drawer ? drawer.querySelector('#btnAddEvent') : null;
+  // Scenes/Entrances/Initial scenes/Scene positions controls
+  const stScenesTable = drawer ? drawer.querySelector('#stScenesTable') : null;
+  const btnAddScene = drawer ? drawer.querySelector('#btnAddScene') : null;
+  const stSceneEditor = drawer ? drawer.querySelector('#stSceneEditor') : null;
+  const stSceneEditId = drawer ? drawer.querySelector('#stSceneEditId') : null;
+  const stSceneEditName = drawer ? drawer.querySelector('#stSceneEditName') : null;
+  const stSceneEditDetails = drawer ? drawer.querySelector('#stSceneEditDetails') : null;
+  const btnAddSceneDetail = drawer ? drawer.querySelector('#btnAddSceneDetail') : null;
+  const stEntrTable = drawer ? drawer.querySelector('#stEntrTable') : null;
+  const btnAddEntrance = drawer ? drawer.querySelector('#btnAddEntrance') : null;
+  const stInitScenesTable = drawer ? drawer.querySelector('#stInitScenesTable') : null;
+  const stInitSceneNameSel = drawer ? drawer.querySelector('#stInitSceneNameSel') : null;
+  const stInitSceneId = drawer ? drawer.querySelector('#stInitSceneId') : null;
+  const btnSetInitScene = drawer ? drawer.querySelector('#btnSetInitScene') : null;
+  const stScenePosSel = drawer ? drawer.querySelector('#stScenePosSel') : null;
+  const stScenePosTable = drawer ? drawer.querySelector('#stScenePosTable') : null;
+  const stScenePosNameSel = drawer ? drawer.querySelector('#stScenePosNameSel') : null;
+  const stScenePosX = drawer ? drawer.querySelector('#stScenePosX') : null;
+  const stScenePosY = drawer ? drawer.querySelector('#stScenePosY') : null;
+  const btnAddScenePos = drawer ? drawer.querySelector('#btnAddScenePos') : null;
+
+  
+  
   // Story multi-selector controls
   const stStorySelect = drawer ? drawer.querySelector('#stStorySelect') : null;
   const btnStoryNew = drawer ? drawer.querySelector('#btnStoryNew') : null;
@@ -1243,6 +1275,194 @@
       scene.objectives.splice(idx,1); renderStoryForm(cfg.story, stateSnap); markDirty('story');
     }));
     scene.objectives = objs;
+
+    // endings
+    function renderEndings(list) {
+      if (!stEndingsBody) return;
+      const arr = Array.isArray(list) ? list : [];
+      cfg.story.endings = arr.map(e => Object.assign({ id:'', label:'', outcome:'neutral', priority:0 }, e||{}));
+      stEndingsBody.innerHTML = '';
+      const mkCell = () => document.createElement('td');
+      const outcomes = ['success','failure','neutral'];
+      cfg.story.endings.forEach((en, idx) => {
+        const tr = document.createElement('tr');
+        // id
+        const tdId = mkCell(); const inId = document.createElement('input'); inId.type='text'; inId.value = en.id || ''; inId.addEventListener('input', ()=>{ cfg.story.endings[idx].id = inId.value.trim(); markDirty('story'); }); tdId.appendChild(inId);
+        // label
+        const tdLabel = mkCell(); const inLabel = document.createElement('input'); inLabel.type='text'; inLabel.value = en.label || ''; inLabel.addEventListener('input', ()=>{ cfg.story.endings[idx].label = inLabel.value; markDirty('story'); }); tdLabel.appendChild(inLabel);
+        // outcome
+        const tdOut = mkCell(); const selOut = document.createElement('select'); outcomes.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; selOut.appendChild(o); }); selOut.value = (en.outcome||'neutral'); selOut.addEventListener('change', ()=>{ cfg.story.endings[idx].outcome = selOut.value; markDirty('story'); }); tdOut.appendChild(selOut);
+        // priority
+        const tdPr = mkCell(); const inPr = document.createElement('input'); inPr.type='number'; inPr.value = (typeof en.priority==='number'? en.priority:0); inPr.addEventListener('input', ()=>{ cfg.story.endings[idx].priority = parseInt(inPr.value||'0',10)||0; markDirty('story'); }); tdPr.appendChild(inPr);
+        // when JSON
+        const tdWhen = mkCell(); const ta = document.createElement('textarea'); ta.rows=3; ta.placeholder='{ "any": [ ... ] }';
+        try { ta.value = en.when ? JSON.stringify(en.when, null, 2) : ''; } catch { ta.value = ''; }
+        const validate = () => { try { const obj = ta.value.trim()? JSON.parse(ta.value): null; ta.style.borderColor=''; cfg.story.endings[idx].when = obj; markDirty('story'); } catch(e){ ta.style.borderColor = '#e11d48'; } };
+        ta.addEventListener('input', validate); tdWhen.appendChild(ta);
+        // ops
+        const tdOps = mkCell(); const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ cfg.story.endings.splice(idx,1); renderEndings(cfg.story.endings); markDirty('story'); }; tdOps.appendChild(btnDel);
+        tr.appendChild(tdId); tr.appendChild(tdLabel); tr.appendChild(tdOut); tr.appendChild(tdPr); tr.appendChild(tdWhen); tr.appendChild(tdOps);
+        stEndingsBody.appendChild(tr);
+      });
+      if (btnAddEnding) btnAddEnding.onclick = () => { cfg.story.endings.push({ id:'', label:'', outcome:'neutral', priority:0, when:{"any":[]} }); renderEndings(cfg.story.endings); markDirty('story'); };
+    }
+    if (stEndingsBody) renderEndings((cfg.story||{}).endings || []);
+
+    // scenes list UI
+    function renderScenesList() {
+      if (!stScenesTable) return;
+      const tbody = stScenesTable.querySelector('tbody');
+      tbody.innerHTML = '';
+      const map = cfg.story.scenes = Object.assign({}, cfg.story.scenes || {});
+      Object.entries(map).forEach(([sid, sc]) => {
+        const tr = document.createElement('tr');
+        const tdId=document.createElement('td'); tdId.textContent=sid; tr.appendChild(tdId);
+        const tdName=document.createElement('td'); const inNm=document.createElement('input'); inNm.type='text'; inNm.value=String((sc||{}).name||''); inNm.addEventListener('input',()=>{ (cfg.story.scenes[sid]||(cfg.story.scenes[sid]={})).name=inNm.value; markDirty('story'); }); tdName.appendChild(inNm); tr.appendChild(tdName);
+        const tdCnt=document.createElement('td'); try{ const n=Array.isArray((sc||{}).details)? (sc.details||[]).length:0; tdCnt.textContent=String(n);}catch(e){ tdCnt.textContent='0'; } tr.appendChild(tdCnt);
+        const tdOp=document.createElement('td');
+        const btnEd=document.createElement('button'); btnEd.className='sm'; btnEd.textContent='编辑'; btnEd.onclick=()=> openSceneEditor(sid);
+        const btnDel=document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.story.scenes[sid]; renderScenesList(); try{renderScenePositions();}catch(_e){}; markDirty('story'); };
+        tdOp.appendChild(btnEd); tdOp.appendChild(btnDel); tr.appendChild(tdOp);
+        tbody.appendChild(tr);
+      });
+      if (btnAddScene) btnAddScene.onclick = () => {
+        const id = prompt('新场景 ID (a-z0-9_-)');
+        if (!id) return;
+        if ((cfg.story.scenes||{})[id]) { alert('已存在同名场景'); return; }
+        (cfg.story.scenes||(cfg.story.scenes={}))[id] = { name:'', details:[] };
+        renderScenesList(); try{renderScenePositions();}catch(_e){}; markDirty('story');
+      };
+    }
+    function openSceneEditor(sid) {
+      if (!stSceneEditor) return;
+      stSceneEditor.classList.remove('hidden');
+      stSceneEditId && (stSceneEditId.value = sid);
+      const sc = (cfg.story.scenes[sid] = Object.assign({ name:'', details:[] }, cfg.story.scenes[sid] || {}));
+      if (stSceneEditName) {
+        stSceneEditName.value = sc.name || '';
+        stSceneEditName.oninput = () => { cfg.story.scenes[sid].name = stSceneEditName.value; markDirty('story'); };
+      }
+      if (stSceneEditDetails) {
+        clearListEdit(stSceneEditDetails);
+        const arr = Array.isArray(sc.details) ? sc.details.slice() : [];
+        arr.forEach((val, idx) => addListRow(stSceneEditDetails, val, v => { cfg.story.scenes[sid].details[idx] = v; markDirty('story'); }, () => {
+          cfg.story.scenes[sid].details.splice(idx,1); openSceneEditor(sid); markDirty('story');
+        }));
+        cfg.story.scenes[sid].details = arr;
+        if (btnAddSceneDetail) btnAddSceneDetail.onclick = () => { cfg.story.scenes[sid].details.push(''); openSceneEditor(sid); markDirty('story'); };
+      }
+    }
+
+    // entrances UI
+    function renderEntrancesTable() {
+      if (!stEntrTable) return;
+      const tbody = stEntrTable.querySelector('tbody');
+      tbody.innerHTML = '';
+      const map = cfg.story.entrances = Object.assign({}, cfg.story.entrances || {});
+      const mkInput=(type,val,on)=>{ const i=document.createElement('input'); i.type=type; i.value=(val!=null? String(val):''); i.addEventListener('input',()=>on(i.value)); return i; };
+      Object.entries(map).forEach(([eid, e]) => {
+        const tr = document.createElement('tr');
+        const tdId=document.createElement('td'); tdId.textContent=eid; tr.appendChild(tdId);
+        const tdLabel=document.createElement('td'); const inLbl=mkInput('text', (e||{}).label||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).label=v; markDirty('story'); }); tdLabel.appendChild(inLbl); tr.appendChild(tdLabel);
+        const tdFrom=document.createElement('td'); const inFrom=mkInput('text', (e||{}).from_scene||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).from_scene=v; markDirty('story'); }); tdFrom.appendChild(inFrom); tr.appendChild(tdFrom);
+        const tdTo=document.createElement('td'); const inTo=mkInput('text', (e||{}).to_scene||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).to_scene=v; markDirty('story'); }); tdTo.appendChild(inTo); tr.appendChild(tdTo);
+        const at = Array.isArray((e||{}).at) ? (e.at||[]) : [];
+        const sp = Array.isArray((e||{}).spawn) ? (e.spawn||[]) : [];
+        const tdAx=document.createElement('td'); const inAx=mkInput('number', (Array.isArray(at)&&at.length>0? String(at[0]) : ''), v=>{ const A=(cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})); const arr=Array.isArray(A.at)?A.at:[0,0]; arr[0]=parseInt(v||'0',10)||0; A.at=arr; markDirty('story'); }); tdAx.appendChild(inAx); tr.appendChild(tdAx);
+        const tdAy=document.createElement('td'); const inAy=mkInput('number', (Array.isArray(at)&&at.length>1? String(at[1]) : ''), v=>{ const A=(cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})); const arr=Array.isArray(A.at)?A.at:[0,0]; arr[1]=parseInt(v||'0',10)||0; A.at=arr; markDirty('story'); }); tdAy.appendChild(inAy); tr.appendChild(tdAy);
+        const tdSx=document.createElement('td'); const inSx=mkInput('number', (Array.isArray(sp)&&sp.length>0? String(sp[0]) : ''), v=>{ const A=(cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})); const arr=Array.isArray(A.spawn)?A.spawn:[0,0]; arr[0]=parseInt(v||'0',10)||0; A.spawn=arr; markDirty('story'); }); tdSx.appendChild(inSx); tr.appendChild(tdSx);
+        const tdSy=document.createElement('td'); const inSy=mkInput('number', (Array.isArray(sp)&&sp.length>1? String(sp[1]) : ''), v=>{ const A=(cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})); const arr=Array.isArray(A.spawn)?A.spawn:[0,0]; arr[1]=parseInt(v||'0',10)||0; A.spawn=arr; markDirty('story'); }); tdSy.appendChild(inSy); tr.appendChild(tdSy);
+        const tdDesc=document.createElement('td'); const inD=mkInput('text', (e||{}).desc||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).desc=v; markDirty('story'); }); tdDesc.appendChild(inD); tr.appendChild(tdDesc);
+        const tdOps=document.createElement('td'); const btnDel=document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.story.entrances[eid]; renderEntrancesTable(); markDirty('story'); }; tdOps.appendChild(btnDel); tr.appendChild(tdOps);
+        tbody.appendChild(tr);
+      });
+      if (btnAddEntrance) btnAddEntrance.onclick = () => {
+        const id = prompt('新入口 ID');
+        if (!id) return;
+        if ((cfg.story.entrances||{})[id]) { alert('已存在同名入口'); return; }
+        (cfg.story.entrances||(cfg.story.entrances={}))[id] = { label:'', from_scene:'', to_scene:'', at:[0,0], spawn:[0,0], desc:'' };
+        renderEntrancesTable(); markDirty('story');
+      };
+    }
+
+    // initial scenes UI
+    function renderInitialScenes() {
+      if (!stInitScenesTable) return;
+      const tbody = stInitScenesTable.querySelector('tbody');
+      tbody.innerHTML = '';
+      const map = cfg.story.initial_scenes = Object.assign({}, cfg.story.initial_scenes || {});
+      Object.entries(map).forEach(([name, sid]) => {
+        const tr=document.createElement('tr');
+        const tdN=document.createElement('td'); tdN.textContent=String(name); tr.appendChild(tdN);
+        const tdS=document.createElement('td'); const inS=document.createElement('input'); inS.type='text'; inS.value=String(sid||''); inS.addEventListener('input',()=>{ cfg.story.initial_scenes[name] = inS.value; markDirty('story'); }); tdS.appendChild(inS); tr.appendChild(tdS);
+        const tdOp=document.createElement('td'); const btnDel=document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.story.initial_scenes[name]; renderInitialScenes(); markDirty('story'); }; tdOp.appendChild(btnDel); tr.appendChild(tdOp);
+        tbody.appendChild(tr);
+      });
+      // populate actor select
+      if (stInitSceneNameSel) {
+        stInitSceneNameSel.innerHTML = '';
+        const names = Object.keys(cfg.characters || {});
+        const ph = document.createElement('option'); ph.value=''; ph.textContent='选择角色…'; stInitSceneNameSel.appendChild(ph);
+        names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; stInitSceneNameSel.appendChild(o); });
+      }
+      if (btnSetInitScene) btnSetInitScene.onclick = () => {
+        const nm = stInitSceneNameSel ? String(stInitSceneNameSel.value||'').trim() : '';
+        const sid = stInitSceneId ? String(stInitSceneId.value||'').trim() : '';
+        if (!nm || !sid) { alert('请选择角色并填写场景ID'); return; }
+        (cfg.story.initial_scenes||(cfg.story.initial_scenes={}))[nm] = sid;
+        renderInitialScenes(); markDirty('story');
+      };
+    }
+
+    // scene positions UI
+    function renderScenePositions() {
+      if (!stScenePosTable) return;
+      const scenes = Object.keys(cfg.story.scenes || {});
+      if (stScenePosSel) {
+        stScenePosSel.innerHTML = '';
+        const ph=document.createElement('option'); ph.value=''; ph.textContent='选择场景…'; stScenePosSel.appendChild(ph);
+        scenes.forEach(id=>{ const o=document.createElement('option'); o.value=id; o.textContent=id; stScenePosSel.appendChild(o); });
+      }
+      const ensure = (s)=>{ cfg.story.scene_positions = Object.assign({}, cfg.story.scene_positions || {}); if (!cfg.story.scene_positions[s]) cfg.story.scene_positions[s] = {}; return cfg.story.scene_positions[s]; };
+      const renderFor = (sid) => {
+        const tbody = stScenePosTable.querySelector('tbody');
+        tbody.innerHTML = '';
+        const mp = ensure(sid);
+        Object.entries(mp).forEach(([nm, arr]) => {
+          const tr=document.createElement('tr');
+          const tdN=document.createElement('td'); tdN.textContent=String(nm); tr.appendChild(tdN);
+          const tdX=document.createElement('td'); const inX=document.createElement('input'); inX.type='number'; inX.value = Array.isArray(arr)&&arr.length>0? String(arr[0]):''; inX.addEventListener('input',()=>{ const v=mp[nm]||[0,0]; v[0]=parseInt(inX.value||'0',10)||0; mp[nm]=v; markDirty('story'); }); tdX.appendChild(inX); tr.appendChild(tdX);
+          const tdY=document.createElement('td'); const inY=document.createElement('input'); inY.type='number'; inY.value = Array.isArray(arr)&&arr.length>1? String(arr[1]):''; inY.addEventListener('input',()=>{ const v=mp[nm]||[0,0]; v[1]=parseInt(inY.value||'0',10)||0; mp[nm]=v; markDirty('story'); }); tdY.appendChild(inY); tr.appendChild(tdY);
+          const tdOp=document.createElement('td'); const btnDel=document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete mp[nm]; renderFor(sid); markDirty('story'); }; tdOp.appendChild(btnDel); tr.appendChild(tdOp);
+          tbody.appendChild(tr);
+        });
+        // populate actor select from characters
+        if (stScenePosNameSel) {
+          stScenePosNameSel.innerHTML='';
+          const ph = document.createElement('option'); ph.value=''; ph.textContent='选择角色…'; stScenePosNameSel.appendChild(ph);
+          Object.keys(cfg.characters||{}).forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; stScenePosNameSel.appendChild(o); });
+        }
+        if (btnAddScenePos) btnAddScenePos.onclick = () => {
+          const nm = stScenePosNameSel ? String(stScenePosNameSel.value||'').trim() : '';
+          const x = parseInt(stScenePosX ? stScenePosX.value||'0' : '0', 10) || 0;
+          const y = parseInt(stScenePosY ? stScenePosY.value||'0' : '0', 10) || 0;
+          if (!nm) { alert('请选择角色'); return; }
+          mp[nm] = [x,y];
+          renderFor(sid); markDirty('story');
+        };
+      };
+      // wire change
+      if (stScenePosSel) stScenePosSel.onchange = () => { const sid = String(stScenePosSel.value||''); if (sid) renderFor(sid); };
+      // auto-select first scene
+      try { if (stScenePosSel && !stScenePosSel.value && scenes.length>0) { stScenePosSel.value = scenes[0]; renderFor(scenes[0]); } } catch(e){}
+    }
+
+    renderScenesList();
+    renderEntrancesTable();
+    renderInitialScenes();
+    renderScenePositions();
+    try { renderTimelineForm((cfg.story||{}).events || []); } catch(e){}
+
     // positions
     const tbody = stTbl.querySelector('tbody');
     tbody.innerHTML = '';
@@ -1379,11 +1599,12 @@
 
   async function loadAllConfigs() {
     // Load latest configs and state snapshot for helpers
-    const [stRes, wpRes, chRes, stState] = await Promise.all([
+    const [stRes, wpRes, chRes, stState, artsRes] = await Promise.all([
       fetch('/api/config/story').then(r=>r.json()).catch(()=>({data:{}})),
       fetch('/api/config/weapons').then(r=>r.json()).catch(()=>({data:{}})),
       fetch('/api/config/characters').then(r=>r.json()).catch(()=>({data:{}})),
       fetch('/api/state').then(r=>r.json()).catch(()=>({state:null})),
+      fetch('/api/config/arts').then(r=>r.json()).catch(()=>({data:{}})),
     ]);
     lastState = (stState||{}).state || lastState || {};
     renderCharactersForm((chRes||{}).data||{});
@@ -1403,6 +1624,8 @@
     renderStoryForm(cfg.story, lastState);
     // Weapons unchanged
     renderWeaponsForm((wpRes||{}).data||{});
+    // Arts
+    renderArtsForm((artsRes||{}).data||{});
   }
 
   function storyCollect() {
@@ -1423,6 +1646,12 @@
     const out = JSON.parse(JSON.stringify(original.story || {}));
     out.scene = JSON.parse(JSON.stringify(s));
     out.initial_positions = pos;
+    if (cfg.story.scenes) out.scenes = JSON.parse(JSON.stringify(cfg.story.scenes));
+    if (cfg.story.entrances) out.entrances = JSON.parse(JSON.stringify(cfg.story.entrances));
+    if (cfg.story.initial_scenes) out.initial_scenes = JSON.parse(JSON.stringify(cfg.story.initial_scenes));
+    if (cfg.story.scene_positions) out.scene_positions = JSON.parse(JSON.stringify(cfg.story.scene_positions));
+    if (Array.isArray(cfg.story.endings)) out.endings = JSON.parse(JSON.stringify(cfg.story.endings));
+    if (Array.isArray(cfg.story.events)) out.events = JSON.parse(JSON.stringify(cfg.story.events));
     return out;
   }
 
@@ -1462,8 +1691,10 @@
   async function saveActive(restart) {
     try {
       let name = activeTab;
+      // timeline edits are stored in story container; write to story endpoint
+      const endpointName = (name === 'timeline') ? 'story' : name;
       let data = null;
-      if (name === 'story') {
+      if (name === 'story' || name === 'timeline') {
         // commit local edits into container; never write legacy active_id
         commitLocalStoryEdits();
         let merged = {};
@@ -1477,8 +1708,9 @@
         data = merged;
       }
       else if (name === 'weapons') data = weaponsCollect();
+      else if (name === 'arts') data = artsCollect();
       else if (name === 'characters') data = charactersCollect();
-      const res = await fetch(`/api/config/${name}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      const res = await fetch(`/api/config/${endpointName}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
       if (!res.ok) {
         const t = await res.text();
         throw new Error(t || '保存失败');
@@ -1525,6 +1757,99 @@
   if (btnCfgReset) btnCfgReset.onclick = async () => { await loadAllConfigs(); alert('已重置为服务器版本'); };
   for (const b of tabBtns) {
     b.onclick = () => setActiveTab(b.getAttribute('data-tab'));
+  }
+
+  // ===== Arts form =====
+  function renderArtsForm(data) {
+    // Deep clone for editing
+    original.arts = JSON.parse(JSON.stringify(data || {}));
+    cfg.arts = JSON.parse(JSON.stringify(data || {}));
+    dirty.arts = false;
+    if (!artsTable) return;
+    const tbody = artsTable.querySelector('tbody');
+    const abilities = ['STR','DEX','CON','INT','POW'];
+    const skillList = ['Arts_Control','Arts_Offense','Perception','Dodge','FirstAid','Firearms_Handgun','Firearms_Rifle_Crossbow'];
+    const fill = () => {
+      tbody.innerHTML = '';
+      Object.entries(cfg.arts || {}).forEach(([id, a]) => {
+        const tr = document.createElement('tr');
+        const td = (el) => { const td=document.createElement('td'); td.appendChild(el); return td; };
+        // ID (readonly)
+        const inId = document.createElement('input'); inId.type='text'; inId.value=id; inId.disabled=true;
+        // label
+        const inLabel = document.createElement('input'); inLabel.type='text'; inLabel.value=(a.label||''); inLabel.oninput=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).label=inLabel.value; markDirty('arts'); };
+        // cast_skill
+        const selCast = document.createElement('select'); skillList.forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; selCast.appendChild(o); }); selCast.value=String(a.cast_skill||'Arts_Control'); selCast.onchange=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).cast_skill=selCast.value; markDirty('arts'); };
+        // resist
+        const selRes = document.createElement('select'); ['Arts_Resist','Dodge'].forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; selRes.appendChild(o); }); selRes.value=String(a.resist||'Arts_Resist'); selRes.onchange=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).resist=selRes.value; markDirty('arts'); };
+        // range_steps
+        const inRange = document.createElement('input'); inRange.type='number'; inRange.value=(a.range_steps!=null? a.range_steps:6); inRange.oninput=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).range_steps=parseInt(inRange.value||'6',10)||6; markDirty('arts'); };
+        // damage
+        const inDmg = document.createElement('input'); inDmg.type='text'; inDmg.value=(a.damage||''); inDmg.placeholder='如 1d6+1d4'; inDmg.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); if (inDmg.value.trim()) m.damage=inDmg.value.trim(); else delete m.damage; markDirty('arts'); };
+        // control.effect
+        const inCtl = document.createElement('input'); inCtl.type='text'; inCtl.value=((a.control||{}).effect||''); inCtl.placeholder='silenced/restrained/sleep/...'; inCtl.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.control=m.control||{}; m.control.effect=inCtl.value.trim(); if (!m.control.effect) delete m.control.effect; markDirty('arts'); };
+        // control.duration
+        const inDur = document.createElement('input'); inDur.type='text'; inDur.value=((a.control||{}).duration||''); inDur.placeholder='1 或 表达式'; inDur.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.control=m.control||{}; m.control.duration=inDur.value.trim(); if (!m.control.duration) delete m.control.duration; markDirty('arts'); };
+        // mp (cost/variable/max)
+        const inCost = document.createElement('input'); inCost.type='number'; inCost.value=((a.mp||{}).cost!=null? a.mp.cost:0); inCost.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.mp=m.mp||{}; m.mp.cost=parseInt(inCost.value||'0',10)||0; markDirty('arts'); };
+        const inVar = document.createElement('input'); inVar.type='checkbox'; inVar.checked=!!((a.mp||{}).variable); inVar.onchange=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.mp=m.mp||{}; m.mp.variable=!!inVar.checked; markDirty('arts'); };
+        const inMax = document.createElement('input'); inMax.type='number'; inMax.value=((a.mp||{}).max!=null? a.mp.max:0); inMax.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.mp=m.mp||{}; m.mp.max=parseInt(inMax.value||'0',10)||0; markDirty('arts'); };
+        const mpWrap = document.createElement('div'); mpWrap.className='row'; mpWrap.appendChild(inCost); const lbl=document.createElement('label'); lbl.textContent=' 可变'; lbl.style.marginLeft='4px'; const wrapVar=document.createElement('span'); wrapVar.appendChild(inVar); wrapVar.appendChild(lbl); mpWrap.appendChild(wrapVar); mpWrap.appendChild(inMax);
+        // tags (comma separated)
+        const inTags = document.createElement('input'); inTags.type='text'; inTags.value=Array.isArray(a.tags)? a.tags.join(',') : ''; inTags.placeholder='tag1,tag2'; inTags.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); const v=inTags.value.trim(); m.tags = v? v.split(/\s*,\s*/).filter(Boolean) : []; markDirty('arts'); };
+        // desc
+        const inDesc = document.createElement('input'); inDesc.type='text'; inDesc.value=(a.desc||''); inDesc.oninput=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).desc=inDesc.value; markDirty('arts'); };
+        // ops
+        const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.arts[id]; fill(); markDirty('arts'); };
+        tr.appendChild(td(inId)); tr.appendChild(td(inLabel)); tr.appendChild(td(selCast)); tr.appendChild(td(selRes)); tr.appendChild(td(inRange)); tr.appendChild(td(inDmg)); tr.appendChild(td(inCtl)); tr.appendChild(td(inDur)); tr.appendChild(td(mpWrap)); tr.appendChild(td(inTags)); tr.appendChild(td(inDesc)); tr.appendChild(td(btnDel));
+        tbody.appendChild(tr);
+      });
+    };
+    fill();
+    if (btnAddArt) btnAddArt.onclick = () => {
+      let id = String(prompt('输入术式 ID（可留空自动生成）')||'').trim();
+      if (!id) { const base='art_'; let i=1; id=base+i; while ((cfg.arts||{})[id]) { i++; id=base+i; } }
+      if ((cfg.arts||{})[id]) { alert('已存在同名 ID'); return; }
+      (cfg.arts||(cfg.arts={}))[id] = { label:'', cast_skill:'Arts_Control', resist:'Arts_Resist', range_steps:6, mp:{ cost:0, variable:false, max:0 }, tags:[] };
+      fill(); markDirty('arts');
+    };
+  }
+
+  function artsCollect() {
+    const out = {};
+    for (const id of Object.keys(cfg.arts || {})) {
+      out[id] = JSON.parse(JSON.stringify(cfg.arts[id] || {}));
+      // 清理空字段
+      if (out[id].damage === '') delete out[id].damage;
+      if (out[id].desc === '') delete out[id].desc;
+      if (out[id].control && !out[id].control.effect && !out[id].control.duration) delete out[id].control;
+      if (out[id].mp && out[id].mp.max==null && out[id].mp.variable==null && out[id].mp.cost==null) delete out[id].mp;
+    }
+    return out;
+  }
+
+  // ===== Timeline form =====
+  function renderTimelineForm(list) {
+    if (!tlTable) return;
+    cfg.story.events = Array.isArray(list) ? JSON.parse(JSON.stringify(list)) : [];
+    const tbody = tlTable.querySelector('tbody');
+    const fill = () => {
+      tbody.innerHTML = '';
+      cfg.story.events.forEach((ev, idx) => {
+        const tr = document.createElement('tr');
+        const td = (el) => { const td=document.createElement('td'); td.appendChild(el); return td; };
+        const inName = document.createElement('input'); inName.type='text'; inName.value=String(ev.name||''); inName.oninput=()=>{ cfg.story.events[idx].name = inName.value; markDirty('story'); };
+        const inTime = document.createElement('input'); inTime.type='text'; inTime.placeholder='08:30'; inTime.value=String(ev.time || ev.time_str || ''); inTime.oninput=()=>{ cfg.story.events[idx].time = inTime.value.trim(); delete cfg.story.events[idx].at; markDirty('story'); };
+        const inNote = document.createElement('input'); inNote.type='text'; inNote.value=String(ev.note||''); inNote.oninput=()=>{ cfg.story.events[idx].note = inNote.value; markDirty('story'); };
+        const taEff = document.createElement('textarea'); taEff.rows=3; try{ taEff.value = ev.effects? JSON.stringify(ev.effects, null, 2) : ''; } catch { taEff.value=''; }
+        taEff.oninput=()=>{ try { const arr = taEff.value.trim()? JSON.parse(taEff.value): []; taEff.style.borderColor=''; cfg.story.events[idx].effects = arr; markDirty('story'); } catch(e){ taEff.style.borderColor='#e11d48'; } };
+        const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ cfg.story.events.splice(idx,1); fill(); markDirty('story'); };
+        tr.appendChild(td(inName)); tr.appendChild(td(inTime)); tr.appendChild(td(inNote)); tr.appendChild(td(taEff)); tr.appendChild(td(btnDel));
+        tbody.appendChild(tr);
+      });
+    };
+    fill();
+    if (btnAddEvent) btnAddEvent.onclick = () => { cfg.story.events.push({ name:'', time:'', note:'', effects:[] }); fill(); markDirty('story'); };
   }
   // Story multi-selector events
   function sanitizeStoryId(s) {
