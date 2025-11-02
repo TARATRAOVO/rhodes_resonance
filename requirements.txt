@@ -2,3 +2,5 @@ fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
 agentscope @ git+https://github.com/agentscope-ai/agentscope.git
 
+
+python-docx>=0.8.11
