@@ -10,4 +10,4 @@ window.RR = window.RR || {};
 // For local development, talk to the same origin (the FastAPI server that also serves the static files).
 // When deploying the frontend separately from the backend, set this to your backend's origin,
 // e.g. "https://your-backend.example.com" and ensure the backend enables CORS for the frontend origin.
-window.RR.backendOrigin = ""; // empty string => same-origin (recommended for local dev)
+window.RR.backendOrigin = "https://inspector-aye-graphs-spend.trycloudflare.com"; // default backend for deployed frontend
