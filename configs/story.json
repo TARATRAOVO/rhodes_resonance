@@ -256,6 +256,248 @@
           }
         }
       ]
+    },
+    "002_multi_branch_demo": {
+      "meta": {
+        "title": "双分支试炼",
+        "style": "选择-时间压迫-轻接触"
+      },
+      "scenes": {
+        "junction": {
+          "name": "旧城区·岔路口",
+          "details": [
+            "潮湿石墙渗水",
+            "岔路一分为二：左窄巷、右库房通道"
+          ]
+        },
+        "left_alley": {
+          "name": "旧城区·左巷",
+          "details": [
+            "左侧窄巷，木栅栏后方有微弱呼救",
+            "巷口有废弃推车挡道"
+          ]
+        },
+        "right_armory": {
+          "name": "旧城区·右库",
+          "details": [
+            "右侧库房，铁门半掩",
+            "内有散落武器箱与油渍"
+          ]
+        }
+      },
+      "entrances": {
+        "ent_j_to_l": {
+          "label": "左巷口",
+          "from_scene": "junction",
+          "at": [
+            3,
+            0
+          ],
+          "to_scene": "left_alley",
+          "spawn": [
+            1,
+            0
+          ],
+          "desc": "通往左侧窄巷"
+        },
+        "ent_j_to_r": {
+          "label": "右侧库门",
+          "from_scene": "junction",
+          "at": [
+            0,
+            3
+          ],
+          "to_scene": "right_armory",
+          "spawn": [
+            0,
+            1
+          ],
+          "desc": "通往右侧库房"
+        },
+        "ent_l_to_j": {
+          "label": "巷口回返",
+          "from_scene": "left_alley",
+          "at": [
+            1,
+            0
+          ],
+          "to_scene": "junction",
+          "spawn": [
+            2,
+            0
+          ],
+          "desc": "返回岔路口"
+        },
+        "ent_r_to_j": {
+          "label": "库门回返",
+          "from_scene": "right_armory",
+          "at": [
+            0,
+            1
+          ],
+          "to_scene": "junction",
+          "spawn": [
+            0,
+            2
+          ],
+          "desc": "返回岔路口"
+        }
+      },
+      "initial_scenes": {
+        "Doctor": "junction",
+        "Amiya": "junction",
+        "Mephisto": "right_armory",
+        "Faust": "right_armory"
+      },
+      "scene_positions": {
+        "junction": {
+          "Doctor": [
+            0,
+            0
+          ],
+          "Amiya": [
+            1,
+            0
+          ]
+        },
+        "right_armory": {
+          "Mephisto": [
+            6,
+            2
+          ],
+          "Faust": [
+            8,
+            -1
+          ]
+        },
+        "left_alley": {}
+      },
+      "scene": {
+        "name": "旧城区·岔路口",
+        "details": [
+          "潮湿石墙渗水",
+          "空气压抑，远处传来金属碰撞"
+        ],
+        "weather": "overcast",
+        "time": "08:00",
+        "objectives": [
+          "选择路径抵达目标区域"
+        ]
+      },
+      "endings": [
+        {
+          "id": "party_wiped",
+          "label": "全员战败",
+          "outcome": "failure",
+          "priority": 100,
+          "when": {
+            "any": [
+              {
+                "actors_dead": {
+                  "names": [
+                    "Doctor"
+                  ],
+                  "require": "any"
+                }
+              },
+              {
+                "participants_alive_at_most": 0
+              }
+            ]
+          }
+        },
+        {
+          "id": "left_success",
+          "label": "左巷-营救成功",
+          "outcome": "success",
+          "priority": 90,
+          "when": {
+            "all": [
+              {
+                "location_is": "旧城区·左巷"
+              },
+              {
+                "time_before": "08:15"
+              },
+              {
+                "actors_alive": {
+                  "names": [
+                    "Doctor",
+                    "Amiya"
+                  ],
+                  "require": "all"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "left_failure",
+          "label": "左巷-错失时机",
+          "outcome": "failure",
+          "priority": 80,
+          "when": {
+            "all": [
+              {
+                "location_is": "旧城区·左巷"
+              },
+              {
+                "time_at_least": "08:15"
+              }
+            ]
+          }
+        },
+        {
+          "id": "right_success",
+          "label": "右库-缴获军械",
+          "outcome": "success",
+          "priority": 70,
+          "when": {
+            "all": [
+              {
+                "location_is": "旧城区·右库"
+              },
+              {
+                "time_before": "08:15"
+              },
+              {
+                "actors_alive": {
+                  "names": [
+                    "Doctor",
+                    "Amiya"
+                  ],
+                  "require": "all"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "right_failure",
+          "label": "右库-错失时机",
+          "outcome": "failure",
+          "priority": 60,
+          "when": {
+            "all": [
+              {
+                "location_is": "旧城区·右库"
+              },
+              {
+                "time_at_least": "08:15"
+              }
+            ]
+          }
+        },
+        {
+          "id": "timeout",
+          "label": "时间耗尽",
+          "outcome": "neutral",
+          "priority": 10,
+          "when": {
+            "time_at_least": "08:30"
+          }
+        }
+      ]
     }
   }
 }
