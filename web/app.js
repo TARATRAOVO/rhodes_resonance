@@ -41,6 +41,11 @@
   // Story endings editor controls
   const stEndingsBody = drawer ? drawer.querySelector('#stEndingsBody') : null;
   const btnAddEnding = drawer ? drawer.querySelector('#btnAddEnding') : null;
+  // When builder modal
+  const whenModal = drawer ? drawer.querySelector('#whenModal') : null;
+  const whenTreeEl = drawer ? drawer.querySelector('#whenTree') : null;
+  const btnWhenOk = drawer ? drawer.querySelector('#btnWhenOk') : null;
+  const btnWhenCancel = drawer ? drawer.querySelector('#btnWhenCancel') : null;
   // Arts controls
   const artsTable = drawer ? drawer.querySelector('#artsTable') : null;
   const btnAddArt = drawer ? drawer.querySelector('#btnAddArt') : null;
@@ -217,6 +222,12 @@
       } catch { trigger.textContent = '请选择'; }
     }
     function ensureWrapWidth(sel, wrap) {
+      // Fit-to-content selects: do not force full width
+      if (sel.classList && sel.classList.contains('fit-select')) {
+        wrap.classList.add('fit');
+        wrap.style.width = 'auto';
+        return;
+      }
       try {
         const rect = sel.getBoundingClientRect();
         if (rect && rect.width) wrap.style.width = rect.width + 'px';
@@ -1291,14 +1302,17 @@
         // label
         const tdLabel = mkCell(); const inLabel = document.createElement('input'); inLabel.type='text'; inLabel.value = en.label || ''; inLabel.addEventListener('input', ()=>{ cfg.story.endings[idx].label = inLabel.value; markDirty('story'); }); tdLabel.appendChild(inLabel);
         // outcome
-        const tdOut = mkCell(); const selOut = document.createElement('select'); outcomes.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; selOut.appendChild(o); }); selOut.value = (en.outcome||'neutral'); selOut.addEventListener('change', ()=>{ cfg.story.endings[idx].outcome = selOut.value; markDirty('story'); }); tdOut.appendChild(selOut);
+        const tdOut = mkCell(); const selOut = document.createElement('select'); selOut.className='fit-select'; outcomes.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; selOut.appendChild(o); }); selOut.value = (en.outcome||'neutral'); selOut.addEventListener('change', ()=>{ cfg.story.endings[idx].outcome = selOut.value; markDirty('story'); }); tdOut.appendChild(selOut);
         // priority
         const tdPr = mkCell(); const inPr = document.createElement('input'); inPr.type='number'; inPr.value = (typeof en.priority==='number'? en.priority:0); inPr.addEventListener('input', ()=>{ cfg.story.endings[idx].priority = parseInt(inPr.value||'0',10)||0; markDirty('story'); }); tdPr.appendChild(inPr);
-        // when JSON
-        const tdWhen = mkCell(); const ta = document.createElement('textarea'); ta.rows=3; ta.placeholder='{ "any": [ ... ] }';
+        // when JSON + builder
+        const tdWhen = mkCell();
+        const ta = document.createElement('textarea'); ta.rows=3; ta.placeholder='{ "any": [ ... ] }'; ta.style.marginBottom='6px';
         try { ta.value = en.when ? JSON.stringify(en.when, null, 2) : ''; } catch { ta.value = ''; }
         const validate = () => { try { const obj = ta.value.trim()? JSON.parse(ta.value): null; ta.style.borderColor=''; cfg.story.endings[idx].when = obj; markDirty('story'); } catch(e){ ta.style.borderColor = '#e11d48'; } };
-        ta.addEventListener('input', validate); tdWhen.appendChild(ta);
+        ta.addEventListener('input', validate);
+        const btnBuild = document.createElement('button'); btnBuild.className='sm'; btnBuild.textContent='编辑条件'; btnBuild.onclick = () => openWhenEditor(idx);
+        tdWhen.appendChild(ta); tdWhen.appendChild(btnBuild);
         // ops
         const tdOps = mkCell(); const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ cfg.story.endings.splice(idx,1); renderEndings(cfg.story.endings); markDirty('story'); }; tdOps.appendChild(btnDel);
         tr.appendChild(tdId); tr.appendChild(tdLabel); tr.appendChild(tdOut); tr.appendChild(tdPr); tr.appendChild(tdWhen); tr.appendChild(tdOps);
@@ -1851,6 +1865,211 @@
     fill();
     if (btnAddEvent) btnAddEvent.onclick = () => { cfg.story.events.push({ name:'', time:'', note:'', effects:[] }); fill(); markDirty('story'); };
   }
+
+  // ======== When Builder (完整树编辑器) ========
+  let _whenDraft = null;          // internal tree being edited
+  let _whenEditEndingIdx = -1;    // which ending we edit
+
+  function _toInternalWhen(node) {
+    // Convert engine shape -> internal { _type: 'any'|'all'|'not', children: [...] } or leaf { kind, ... }
+    if (!node || typeof node !== 'object') return null;
+    const keys = Object.keys(node);
+    if (keys.length === 1 && (keys[0] === 'any' || keys[0] === 'all' || keys[0] === 'not')) {
+      const k = keys[0];
+      const raw = node[k];
+      const children = Array.isArray(raw) ? raw.map(_toInternalWhen).filter(Boolean) : (raw ? [_toInternalWhen(raw)] : []);
+      return { _type: k, children };
+    }
+    // leaf conditions: pass-through but tag with kind
+    const leafKinds = ['objectives','actors_alive','actors_dead','hostiles_present','marks_contains','location_is','tension_at_least','tension_at_most','participants_alive_at_least','participants_alive_at_most','time_before','time_at_least'];
+    for (const k of leafKinds) {
+      if (k in node) return { kind: k, value: JSON.parse(JSON.stringify(node[k])) };
+    }
+    // direct leaf with fields (e.g., { time_before: '08:30' }) already handled above
+    // unknown -> null
+    return null;
+  }
+
+  function _toEngineWhen(internal) {
+    if (!internal || typeof internal !== 'object') return null;
+    if (internal._type) {
+      const kids = Array.isArray(internal.children) ? internal.children.map(_toEngineWhen).filter(Boolean) : [];
+      if (internal._type === 'not') {
+        return { not: (kids[0] || null) };
+      }
+      return { [internal._type]: kids };
+    }
+    if (internal.kind) {
+      return { [internal.kind]: JSON.parse(JSON.stringify(internal.value)) };
+    }
+    return null;
+  }
+
+  function openWhenEditor(endingIdx) {
+    if (!whenModal || !whenTreeEl) return;
+    _whenEditEndingIdx = endingIdx;
+    const en = (cfg.story.endings || [])[endingIdx] || {};
+    const w = en.when || { any: [] };
+    _whenDraft = _toInternalWhen(w) || { _type: 'any', children: [] };
+    whenModal.classList.remove('hidden');
+    whenModal.setAttribute('aria-hidden', 'false');
+    renderWhenTree();
+  }
+  function closeWhenEditor() {
+    if (!whenModal) return;
+    whenModal.classList.add('hidden');
+    whenModal.setAttribute('aria-hidden', 'true');
+    _whenDraft = null; _whenEditEndingIdx = -1;
+  }
+
+  function _arrayInput(value, placeholder, onChange) {
+    const wrap = document.createElement('div');
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.placeholder = placeholder || 'a,b,c';
+    inp.value = Array.isArray(value) ? value.join(',') : (value || '');
+    inp.oninput = () => {
+      const v = inp.value.trim();
+      onChange(v ? v.split(/\s*,\s*/).filter(Boolean) : []);
+    };
+    wrap.appendChild(inp); return wrap;
+  }
+
+  function _namedSelect(options, value, onChange) {
+    const sel = document.createElement('select');
+    const ph = document.createElement('option'); ph.value=''; ph.textContent='请选择'; sel.appendChild(ph);
+    options.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); });
+    sel.value = (Array.isArray(value)? value[0]: value) || '';
+    sel.onchange = () => onChange(sel.value);
+    return sel;
+  }
+
+  function renderWhenTree() {
+    if (!whenTreeEl) return;
+    whenTreeEl.innerHTML = '';
+    const root = _whenDraft || { _type:'any', children: [] };
+    whenTreeEl.appendChild(renderWhenNode(root, []));
+  }
+
+  function renderWhenNode(node, path) {
+    const wrap = document.createElement('div');
+    wrap.className = 'when-node';
+    const head = document.createElement('div'); head.className='head'; wrap.appendChild(head);
+    const actions = document.createElement('div'); actions.className='when-actions'; wrap.appendChild(actions);
+
+    const suggest = {
+      actors: Object.keys(cfg.characters || {}),
+      objectives: ((cfg.story||{}).scene||{}).objectives || [],
+      scenes: Object.keys((cfg.story||{}).scenes || {}),
+    };
+
+    // Helper to locate node by path
+    const getNode = (p) => p.reduce((acc, i) => acc.children[i], _whenDraft);
+    const setNode = (p, val) => {
+      if (p.length === 0) { _whenDraft = val; return; }
+      const parent = p.slice(0,-1).reduce((acc, i) => acc.children[i], _whenDraft);
+      parent.children[p[p.length-1]] = val;
+    };
+    const removeNode = (p) => {
+      if (p.length === 0) return; // do not remove root
+      const parent = p.slice(0,-1).reduce((acc, i) => acc.children[i], _whenDraft);
+      parent.children.splice(p[p.length-1], 1);
+    };
+
+    if (node._type) {
+      // Group node
+      const lab = document.createElement('span'); lab.textContent = '组：'; head.appendChild(lab);
+      const sel = document.createElement('select'); sel.className='fit-select'; ['any','all','not'].forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=t; sel.appendChild(o); }); sel.value=node._type; sel.onchange=()=>{ node._type = sel.value; renderWhenTree(); }; head.appendChild(sel);
+      if (path.length > 0) { const del=document.createElement('button'); del.className='sm'; del.textContent='删除本组'; del.onclick=()=>{ removeNode(path); renderWhenTree(); }; head.appendChild(del); }
+      const kids = document.createElement('div'); kids.className='when-children'; wrap.appendChild(kids);
+      node.children = Array.isArray(node.children) ? node.children : [];
+      node.children.forEach((ch, idx) => { kids.appendChild(renderWhenNode(ch, path.concat(idx))); });
+      // add child controls
+      const addSel = document.createElement('select'); addSel.className='fit-select';
+      ['any','all','not','objectives','time_before','time_at_least','actors_alive','actors_dead','participants_alive_at_least','participants_alive_at_most','hostiles_present','marks_contains','tension_at_least','tension_at_most','location_is'].forEach(k=>{ const o=document.createElement('option'); o.value=k; o.textContent=k; addSel.appendChild(o); });
+      const btnAdd = document.createElement('button'); btnAdd.className='sm'; btnAdd.textContent='添加子条件'; btnAdd.onclick=()=>{
+        const k = addSel.value;
+        if (k==='any' || k==='all' || k==='not') node.children.push({ _type: k, children: [] });
+        else node.children.push(defaultLeaf(k));
+        renderWhenTree();
+      };
+      actions.appendChild(addSel); actions.appendChild(btnAdd);
+      return wrap;
+    }
+    // Leaf nodes UI
+    const kind = node.kind || 'objectives';
+    const selK = document.createElement('select'); selK.className='fit-select';
+    ['objectives','time_before','time_at_least','actors_alive','actors_dead','participants_alive_at_least','participants_alive_at_most','hostiles_present','marks_contains','tension_at_least','tension_at_most','location_is'].forEach(k=>{ const o=document.createElement('option'); o.value=k; o.textContent=k; selK.appendChild(o); });
+    selK.value = kind;
+    selK.onchange = () => {
+      const repl = defaultLeaf(selK.value);
+      setNode(path, repl); renderWhenTree();
+    };
+    head.appendChild(selK);
+    if (path.length > 0) { const del=document.createElement('button'); del.className='sm'; del.textContent='删除'; del.onclick=()=>{ removeNode(path); renderWhenTree(); }; head.appendChild(del); }
+
+    const form = document.createElement('div'); form.className='when-children'; wrap.appendChild(form);
+    const v = node.value || {};
+
+    const label = (t)=>{ const l=document.createElement('label'); l.className='lbl'; l.textContent=t; form.appendChild(l); };
+    const addRow = (el)=>{ form.appendChild(el); };
+
+    if (kind === 'objectives') {
+      label('目标名称（逗号分隔）'); addRow(_arrayInput(v.names || suggest.objectives, '目标1,目标2', names=>{ node.value = Object.assign({}, v, { names }); }));
+      label('要求'); const selReq=document.createElement('select'); selReq.className='fit-select'; ['all','any'].forEach(x=>{ const o=document.createElement('option'); o.value=x; o.textContent=x; selReq.appendChild(o); }); selReq.value = (v.require||'all'); selReq.onchange=()=>{ node.value = Object.assign({}, node.value, { require: selReq.value }); }; addRow(selReq);
+      label('状态'); const selSt=document.createElement('select'); selSt.className='fit-select'; ['done','blocked','any'].forEach(x=>{ const o=document.createElement('option'); o.value=x; o.textContent=x; selSt.appendChild(o); }); selSt.value=(v.status||'done'); selSt.onchange=()=>{ node.value = Object.assign({}, node.value, { status: selSt.value }); }; addRow(selSt);
+    } else if (kind === 'time_before' || kind === 'time_at_least') {
+      label('时间（HH:MM 或 分钟）'); const inp=document.createElement('input'); inp.type='text'; inp.placeholder='08:30'; inp.value=String(v||''); inp.oninput=()=>{ node.value = inp.value; }; addRow(inp);
+    } else if (kind === 'actors_alive' || kind === 'actors_dead') {
+      label('角色（逗号分隔）'); addRow(_arrayInput((v.names||suggest.actors), 'Amiya,Doctor', names=>{ node.value = Object.assign({}, node.value, { names }); }));
+      label('要求'); const selReq=document.createElement('select'); selReq.className='fit-select'; ['all','any'].forEach(x=>{ const o=document.createElement('option'); o.value=x; o.textContent=x; selReq.appendChild(o); }); selReq.value=(v.require||'all'); selReq.onchange=()=>{ node.value = Object.assign({}, node.value, { require: selReq.value }); }; addRow(selReq);
+    } else if (kind === 'participants_alive_at_least' || kind === 'participants_alive_at_most') {
+      label('人数'); const inp=document.createElement('input'); inp.type='number'; inp.value=String(v||0); inp.oninput=()=>{ node.value = parseInt(inp.value||'0',10)||0; }; addRow(inp);
+    } else if (kind === 'hostiles_present') {
+      label('是否存在敌对'); const sel=document.createElement('select'); sel.className='fit-select'; [{v:true,t:'是'}, {v:false,t:'否'}].forEach(o=>{ const op=document.createElement('option'); op.value=String(o.v); op.textContent=o.t; sel.appendChild(op); }); sel.value=String((typeof v==='object'? v.value : v) ?? true);
+      sel.onchange=()=>{ const cur = (v && typeof v==='object')? v: { value: true }; const want=(sel.value==='true'); node.value = Object.assign({}, cur, { value: want }); }; addRow(sel);
+      label('阈值（可选）'); const thr=document.createElement('input'); thr.type='number'; thr.placeholder='-10'; thr.value=String((v && v.threshold!=null) ? v.threshold : ''); thr.oninput=()=>{ const val=thr.value.trim(); const cur=(v&&typeof v==='object')? v: { value: (sel.value==='true') }; if (val==='') { delete cur.threshold; } else { cur.threshold=parseInt(val||'0',10)||0; } node.value = cur; }; addRow(thr);
+    } else if (kind === 'marks_contains') {
+      label('标记（逗号分隔）'); addRow(_arrayInput(v||[], 'mark1,mark2', arr=>{ node.value = arr; }));
+    } else if (kind === 'tension_at_least' || kind === 'tension_at_most') {
+      label('紧张度'); const inp=document.createElement('input'); inp.type='number'; inp.value=String(v||0); inp.oninput=()=>{ node.value = parseInt(inp.value||'0',10)||0; }; addRow(inp);
+    } else if (kind === 'location_is') {
+      label('地点'); addRow(_namedSelect(suggest.scenes, v, vv=>{ node.value = vv; }));
+    }
+
+    return wrap;
+  }
+
+  function defaultLeaf(kind) {
+    switch(kind){
+      case 'objectives': return { kind, value: { names: (((cfg.story||{}).scene||{}).objectives||[]), require:'all', status:'done' } };
+      case 'time_before': return { kind, value: '08:30' };
+      case 'time_at_least': return { kind, value: '08:30' };
+      case 'actors_alive': return { kind, value: { names: Object.keys(cfg.characters||{}), require: 'all' } };
+      case 'actors_dead': return { kind, value: { names: [], require: 'any' } };
+      case 'participants_alive_at_least': return { kind, value: 1 };
+      case 'participants_alive_at_most': return { kind, value: 0 };
+      case 'hostiles_present': return { kind, value: { value: true, threshold: -10 } };
+      case 'marks_contains': return { kind, value: [] };
+      case 'tension_at_least': return { kind, value: 1 };
+      case 'tension_at_most': return { kind, value: 1 };
+      case 'location_is': return { kind, value: '' };
+      default: return { kind: 'objectives', value: { names: [], require: 'all', status: 'done' } };
+    }
+  }
+
+  // Wire modal buttons
+  if (btnWhenCancel) btnWhenCancel.onclick = () => closeWhenEditor();
+  if (btnWhenOk) btnWhenOk.onclick = () => {
+    try {
+      const eng = _toEngineWhen(_whenDraft);
+      if (_whenEditEndingIdx >= 0 && cfg.story && Array.isArray(cfg.story.endings)) {
+        cfg.story.endings[_whenEditEndingIdx].when = eng;
+        // Refresh endings table and close
+        renderStoryForm(cfg.story, lastState || null);
+      }
+    } catch(e) { /* ignore */ }
+    closeWhenEditor();
+  };
   // Story multi-selector events
   function sanitizeStoryId(s) {
     try { return String(s||'').trim().toLowerCase().replace(/\s+/g,'_'); } catch { return ''; }

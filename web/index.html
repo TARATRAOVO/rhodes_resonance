@@ -150,12 +150,12 @@
           <div class="section">
             <h4 class="h">结局（endings）</h4>
             <div class="tbl-wrap">
-              <table class="tbl">
+              <table class="tbl auto">
                 <thead>
                   <tr>
                     <th style="width:14ch">ID</th>
                     <th style="width:16ch">标题</th>
-                    <th style="width:10ch">结果</th>
+                    <th style="width:14ch">结果</th>
                     <th style="width:10ch">优先级</th>
                     <th>条件（when，JSON）</th>
                     <th style="width:10ch">操作</th>
@@ -309,6 +309,24 @@
           </table>
           <button id="btnAddEvent" class="sm">+ 新增事件</button>
           <div class="dim" style="margin-top:6px">提示：时间轴保存在 story.json 的 stories.<ID>.events；运行时需要推进时间（advance_time）才会触发。</div>
+        </div>
+        
+        <!-- When Builder Modal -->
+        <div id="whenModal" class="modal hidden" aria-hidden="true">
+          <div class="modal-backdrop"></div>
+          <div class="modal-inner">
+            <div class="modal-head">
+              <h4 class="h">编辑结局条件</h4>
+              <div class="ops">
+                <button id="btnWhenCancel" class="ghost">取消</button>
+                <button id="btnWhenOk">确定</button>
+              </div>
+            </div>
+            <div class="modal-body">
+              <div id="whenTree"></div>
+              <div class="dim" style="margin-top:6px">说明：支持任意嵌套的 any/all/not；叶子条件包括 objectives/time/actors_alive/actors_dead/participants_alive_*/hostiles_present/marks_contains/tension_*/location_is。</div>
+            </div>
+          </div>
         </div>
 
         <!-- Characters Tab (表单化) -->
