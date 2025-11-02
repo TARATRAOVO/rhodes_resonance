@@ -38,6 +38,43 @@
   const btnAddDetail = drawer ? drawer.querySelector('#btnAddDetail') : null;
   const btnAddObjective = drawer ? drawer.querySelector('#btnAddObjective') : null;
   const btnAddPos = drawer ? drawer.querySelector('#btnAddPos') : null;
+  // Story endings editor controls
+  const stEndingsBody = drawer ? drawer.querySelector('#stEndingsBody') : null;
+  const btnAddEnding = drawer ? drawer.querySelector('#btnAddEnding') : null;
+  // When builder modal
+  const whenModal = drawer ? drawer.querySelector('#whenModal') : null;
+  const whenTreeEl = drawer ? drawer.querySelector('#whenTree') : null;
+  const btnWhenOk = drawer ? drawer.querySelector('#btnWhenOk') : null;
+  const btnWhenCancel = drawer ? drawer.querySelector('#btnWhenCancel') : null;
+  // Arts controls
+  const artsTable = drawer ? drawer.querySelector('#artsTable') : null;
+  const btnAddArt = drawer ? drawer.querySelector('#btnAddArt') : null;
+  // Timeline controls
+  const tlTable = drawer ? drawer.querySelector('#tlTable') : null;
+  const btnAddEvent = drawer ? drawer.querySelector('#btnAddEvent') : null;
+  // Scenes/Entrances/Initial scenes/Scene positions controls
+  const stScenesTable = drawer ? drawer.querySelector('#stScenesTable') : null;
+  const btnAddScene = drawer ? drawer.querySelector('#btnAddScene') : null;
+  const stSceneEditor = drawer ? drawer.querySelector('#stSceneEditor') : null;
+  const stSceneEditId = drawer ? drawer.querySelector('#stSceneEditId') : null;
+  const stSceneEditName = drawer ? drawer.querySelector('#stSceneEditName') : null;
+  const stSceneEditDetails = drawer ? drawer.querySelector('#stSceneEditDetails') : null;
+  const btnAddSceneDetail = drawer ? drawer.querySelector('#btnAddSceneDetail') : null;
+  const stEntrTable = drawer ? drawer.querySelector('#stEntrTable') : null;
+  const btnAddEntrance = drawer ? drawer.querySelector('#btnAddEntrance') : null;
+  const stInitScenesTable = drawer ? drawer.querySelector('#stInitScenesTable') : null;
+  const stInitSceneNameSel = drawer ? drawer.querySelector('#stInitSceneNameSel') : null;
+  const stInitSceneId = drawer ? drawer.querySelector('#stInitSceneId') : null;
+  const btnSetInitScene = drawer ? drawer.querySelector('#btnSetInitScene') : null;
+  const stScenePosSel = drawer ? drawer.querySelector('#stScenePosSel') : null;
+  const stScenePosTable = drawer ? drawer.querySelector('#stScenePosTable') : null;
+  const stScenePosNameSel = drawer ? drawer.querySelector('#stScenePosNameSel') : null;
+  const stScenePosX = drawer ? drawer.querySelector('#stScenePosX') : null;
+  const stScenePosY = drawer ? drawer.querySelector('#stScenePosY') : null;
+  const btnAddScenePos = drawer ? drawer.querySelector('#btnAddScenePos') : null;
+
+  
+  
   // Story multi-selector controls
   const stStorySelect = drawer ? drawer.querySelector('#stStorySelect') : null;
   const btnStoryNew = drawer ? drawer.querySelector('#btnStoryNew') : null;
@@ -80,6 +117,7 @@
   const maxDelay = 8000;
   const maxStory = 500;
   let waitingActor = '';
+  let mapPlayer = '';
   // simple command history for CLI experience
   const cmdHist = [];
   let cmdIdx = -1; // points to next insert position
@@ -184,6 +222,12 @@
       } catch { trigger.textContent = '请选择'; }
     }
     function ensureWrapWidth(sel, wrap) {
+      // Fit-to-content selects: do not force full width
+      if (sel.classList && sel.classList.contains('fit-select')) {
+        wrap.classList.add('fit');
+        wrap.style.width = 'auto';
+        return;
+      }
       try {
         const rect = sel.getBoundingClientRect();
         if (rect && rect.width) wrap.style.width = rect.width + 'px';
@@ -391,6 +435,60 @@
         }
         ctx.restore();
       }
+      _drawEntrances(state, bounds, stepPx, focusScene) {
+        // Draw scene entrances as diamond markers with labels.
+        const ctx = this.ctx; if (!ctx) return;
+        const pad = 24;
+        const originX = pad - bounds.minX * stepPx;
+        const originY = pad - bounds.minY * stepPx;
+        const ents = state.entrances || {};
+        const scenes = state.scenes || {};
+
+        ctx.save();
+        ctx.font = '11px ui-monospace, Menlo, monospace';
+        ctx.textBaseline = 'middle';
+        for (const [eid, e] of Object.entries(ents)) {
+          try {
+            const from = String((e || {}).from_scene || '');
+            if (focusScene && from !== String(focusScene)) continue; // only draw in-focus scene
+            const at = (e || {}).at;
+            if (!Array.isArray(at) || at.length < 2) continue;
+            const gx = parseInt(at[0], 10);
+            const gy = parseInt(at[1], 10);
+            if (!Number.isFinite(gx) || !Number.isFinite(gy)) continue;
+
+            const x = originX + gx * stepPx;
+            const y = originY + gy * stepPx;
+
+            // Diamond marker (rotated square)
+            const size = Math.max(6, Math.min(10, stepPx * 0.6));
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.rotate(Math.PI / 4);
+            ctx.fillStyle = '#d97706';       // amber-ish color for entrances
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            const half = size / 1.4;
+            ctx.beginPath();
+            ctx.rect(-half, -half, size, size);
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+
+            // Label: "label → to_scene_name"
+            const label = String((e || {}).label || '');
+            const toId = String((e || {}).to_scene || '');
+            const toName = String(((scenes[toId] || {}).name || toId));
+            const text = label ? `${label} → ${toName}` : `→ ${toName}`;
+            ctx.fillStyle = this.theme.text || '#383838';
+            ctx.fillText(text, x + size * 0.9 + 4, y);
+          } catch (_e) {
+            // be defensive; skip malformed entries
+            continue;
+          }
+        }
+        ctx.restore();
+      }
       _drawActors(state, bounds, stepPx) {
         const ctx = this.ctx; if (!ctx) return;
         const pad = 24;
@@ -422,10 +520,57 @@
         const w = this.canvas.clientWidth || 0;
         const h = this.canvas.clientHeight || 0;
         if (w <= 0 || h <= 0) return;
-        const positions = (state && state.positions) || (this._lastState && this._lastState.positions) || {};
-        const b = this._computeBounds(positions);
+        const st = this._lastState || {};
+        const posAll = (st.positions || {});
+        const sceneOf = st.scene_of || {};
+        // Always prefer a player-anchored focus scene if resolvable
+        let focusScene = null;
+        const chars = st.characters || {};
+        for (const nm of Object.keys(chars)) {
+          try { if (String((chars[nm]||{}).type||'npc').toLowerCase() === 'player') { const sc = sceneOf[nm]; if (typeof sc === 'string' && sc) { focusScene = sc; break; } } } catch(e){}
+        }
+        if (!focusScene) {
+          // fallback: map location name to scene id
+          const loc = String(st.location || '');
+          const scenes = st.scenes || {};
+          for (const sid of Object.keys(scenes)) {
+            try { const nm = String((scenes[sid]||{}).name || sid); if (nm === loc) { focusScene = sid; break; } } catch(e){}
+          }
+        }
+        // Build view positions: if we know the focus scene, show only actors in that scene;
+        // else, fall back to participants; if still not available, show all.
+        let posView = {};
+        if (focusScene) {
+          for (const [nm, p] of Object.entries(posAll)) { if (String(sceneOf[nm]||'') === String(focusScene)) posView[nm] = p; }
+        } else {
+          const parts = Array.isArray(st.participants) ? st.participants.slice() : [];
+          if (parts.length > 0) {
+            const keep = new Set(parts.map(String));
+            for (const [nm, p] of Object.entries(posAll)) { if (keep.has(String(nm))) posView[nm] = p; }
+          } else {
+            posView = posAll;
+          }
+        }
+        // Also include entrance coordinates when computing bounds so we can
+        // draw entrances even if no actors are present in the focus scene.
+        const entsAll = (st.entrances || {});
+        const entPoints = [];
+        for (const [eid, e] of Object.entries(entsAll)) {
+          try {
+            const from = String((e || {}).from_scene || '');
+            if (focusScene && from !== String(focusScene)) continue;
+            const at = (e || {}).at;
+            if (!Array.isArray(at) || at.length < 2) continue;
+            const gx = parseInt(at[0], 10);
+            const gy = parseInt(at[1], 10);
+            if (Number.isFinite(gx) && Number.isFinite(gy)) entPoints.push([gx, gy]);
+          } catch (_e) { /* ignore */ }
+        }
+        const posForBounds = Object.assign({}, posView);
+        entPoints.forEach((xy, i) => { posForBounds[`__ent_${i}`] = xy; });
+        const b = this._computeBounds(posForBounds);
         if (!b) {
-          if (this.hint) this.hint.textContent = '暂无坐标';
+          if (this.hint) this.hint.textContent = '暂无坐标/入口';
           return;
         }
         if (this.hint) this.hint.textContent = '';
@@ -434,7 +579,11 @@
         const spanY = (b.maxY - b.minY + 1);
         const stepPx = Math.max(6, Math.min((w - pad*2) / spanX, (h - pad*2) / spanY));
         this._drawGrid(b, stepPx);
-        this._drawActors(this._lastState || {}, b, stepPx);
+        // Render only filtered positions
+        const stateView = Object.assign({}, st, { positions: posView });
+        // Draw entrances for the focus scene before actors
+        this._drawEntrances(stateView, b, stepPx, focusScene);
+        this._drawActors(stateView, b, stepPx);
       }
       update(state) { this.render(state); }
     }
@@ -599,18 +748,39 @@
     } catch(e){ throw e }
   }
 
-  // 拉取后端预览态（不启动）并渲染
+  // 拉取后端可见快照（不启动）并渲染（地图仅使用该接口）
   async function fetchPreviewAndRender() {
-    const sid = getSelectedStoryId();
-    let url = '/api/preview_state';
-    if (sid) url += `?id=${encodeURIComponent(sid)}`;
-    const res = await fetch(url);
+    const res = await fetch('/api/visible_state');
     if (!res.ok) return;
     const obj = await res.json();
     if (obj && obj.state && !running) {
       renderHUD(obj.state);
       if (mapView) mapView.update(obj.state);
     }
+  }
+
+  async function updateMapFromVisible(actorName) {
+    try {
+      let url = '/api/visible_state';
+      const nm = String(actorName || '').trim();
+      if (nm) url += `?actor=${encodeURIComponent(nm)}`;
+      const res = await fetch(url);
+      if (!res.ok) return;
+      const obj = await res.json();
+      if (obj && obj.state && mapView) mapView.update(obj.state);
+    } catch(e) { /* ignore */ }
+  }
+
+  function firstPlayerActor() {
+    try {
+      const st = lastState || {};
+      const chars = st.characters || {};
+      for (const nm of Object.keys(chars)) {
+        const t = String(((chars[nm]||{}).type||'npc')).toLowerCase();
+        if (t === 'player') return nm;
+      }
+    } catch(e) { /* ignore */ }
+    return '';
   }
 
   function handleEvent(ev) {
@@ -632,7 +802,8 @@
         }
       }
       renderHUD(lastState);
-      if (mapView) mapView.update(lastState);
+      // 地图仅用可见快照（优先固定玩家名）
+      updateMapFromVisible(mapPlayer || firstPlayerActor());
       return;
     }
     // 精简叙事：展示对白；仅隐藏上下文/回合横幅/世界概要
@@ -683,10 +854,11 @@
               return `${a} -> ${d} 使用 ${w}`;
             }
             if (tool === 'advance_position') {
-              const n = params.name || actor; const tgt = params.target; const steps = params.steps != null ? params.steps : '';
+              const n = params.name || actor; const tgt = params.target; const steps = (params.steps != null ? params.steps : null);
               // Enforce [x,y] array for display; fall back to raw string if malformed
               const xy = (Array.isArray(tgt) && tgt.length >= 2) ? `(${tgt[0]},${tgt[1]})` : String(tgt || '');
-              return `${n} 向 ${xy} 前进 ${steps} 步`;
+              if (steps != null) return `${n} 向 ${xy} 前进 ${steps} 步`;
+              return `${n} 向 ${xy} 前进`;
             }
             if (tool === 'adjust_relation') {
               const a = params.a || ''; const b = params.b || ''; const v = params.value;
@@ -742,8 +914,11 @@
       return;
     }
     if (t === 'error') {
-      const msg = (ev.data && ev.data.message) || 'error';
-      storyEl.appendChild(lineEl(`error: ${esc(String(msg))}`, 'error'));
+      const msg = (ev.message != null ? ev.message : (ev.data && ev.data.message)) || 'error';
+      const et = (ev.error_type != null ? ev.error_type : (ev.data && ev.data.error_type)) || '';
+      const ph = ev.phase || '';
+      const tail = `${et ? ` (${et})` : ''}${ph ? ` [${ph}]` : ''}`;
+      storyEl.appendChild(lineEl(`error${tail}: ${esc(String(msg))}`, 'error'));
       if (storyEl.children.length > maxStory) storyEl.removeChild(storyEl.firstChild);
       scrollToBottom(storyEl.parentElement);
       return;
@@ -764,7 +939,9 @@
         const obj = JSON.parse(m.data);
         if (obj.type === 'hello') {
           if (typeof obj.last_sequence === 'number') lastSeq = Math.max(lastSeq, obj.last_sequence);
-          if (obj.state) { renderHUD(obj.state); if (mapView) mapView.update(obj.state); }
+          if (obj.state) { renderHUD(obj.state); }
+          // 地图仅用可见快照（优先固定玩家名）
+          updateMapFromVisible(mapPlayer || firstPlayerActor());
           // 查询一次运行状态，刷新按钮
           paused = !!obj.paused;
           fetch('/api/state').then(r=>r.json()).then(st => {
@@ -784,6 +961,7 @@
             if (ev && ev.event_type === 'system') {
               if (ev.phase === 'player_input') {
                 waitingActor = String(ev.actor || '');
+                mapPlayer = waitingActor || mapPlayer;
                 playerHint.textContent = waitingActor ? `等待 ${waitingActor} 输入...` : '等待玩家输入...';
                 btnSend.disabled = !waitingActor;
                 if (waitingActor) txtPlayer.focus();
@@ -890,8 +1068,9 @@
       // 刷新一下状态
       try {
         const st = await (await fetch('/api/state')).json();
-        if (st && st.state) { renderHUD(st.state); if (mapView) mapView.update(st.state); }
+        if (st && st.state) { renderHUD(st.state); }
         running = !!(st && st.running);
+        await updateMapFromVisible(firstPlayerActor());
       } catch(e){ throw e }
       if (!ws) connectWS();
       updateButtons();
@@ -1107,6 +1286,197 @@
       scene.objectives.splice(idx,1); renderStoryForm(cfg.story, stateSnap); markDirty('story');
     }));
     scene.objectives = objs;
+
+    // endings
+    function renderEndings(list) {
+      if (!stEndingsBody) return;
+      const arr = Array.isArray(list) ? list : [];
+      cfg.story.endings = arr.map(e => Object.assign({ id:'', label:'', outcome:'neutral', priority:0 }, e||{}));
+      stEndingsBody.innerHTML = '';
+      const mkCell = () => document.createElement('td');
+      const outcomes = ['success','failure','neutral'];
+      cfg.story.endings.forEach((en, idx) => {
+        const tr = document.createElement('tr');
+        // id
+        const tdId = mkCell(); const inId = document.createElement('input'); inId.type='text'; inId.value = en.id || ''; inId.addEventListener('input', ()=>{ cfg.story.endings[idx].id = inId.value.trim(); markDirty('story'); }); tdId.appendChild(inId);
+        // label
+        const tdLabel = mkCell(); const inLabel = document.createElement('input'); inLabel.type='text'; inLabel.value = en.label || ''; inLabel.addEventListener('input', ()=>{ cfg.story.endings[idx].label = inLabel.value; markDirty('story'); }); tdLabel.appendChild(inLabel);
+        // outcome
+        const tdOut = mkCell(); const selOut = document.createElement('select'); selOut.className='fit-select'; outcomes.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; selOut.appendChild(o); }); selOut.value = (en.outcome||'neutral'); selOut.addEventListener('change', ()=>{ cfg.story.endings[idx].outcome = selOut.value; markDirty('story'); }); tdOut.appendChild(selOut);
+        // priority
+        const tdPr = mkCell(); const inPr = document.createElement('input'); inPr.type='number'; inPr.value = (typeof en.priority==='number'? en.priority:0); inPr.addEventListener('input', ()=>{ cfg.story.endings[idx].priority = parseInt(inPr.value||'0',10)||0; markDirty('story'); }); tdPr.appendChild(inPr);
+        // when JSON + builder
+        const tdWhen = mkCell();
+        const ta = document.createElement('textarea'); ta.rows=3; ta.placeholder='{ "any": [ ... ] }'; ta.style.marginBottom='6px';
+        try { ta.value = en.when ? JSON.stringify(en.when, null, 2) : ''; } catch { ta.value = ''; }
+        const validate = () => { try { const obj = ta.value.trim()? JSON.parse(ta.value): null; ta.style.borderColor=''; cfg.story.endings[idx].when = obj; markDirty('story'); } catch(e){ ta.style.borderColor = '#e11d48'; } };
+        ta.addEventListener('input', validate);
+        const btnBuild = document.createElement('button'); btnBuild.className='sm'; btnBuild.textContent='编辑条件'; btnBuild.onclick = () => openWhenEditor(idx);
+        tdWhen.appendChild(ta); tdWhen.appendChild(btnBuild);
+        // ops
+        const tdOps = mkCell(); const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ cfg.story.endings.splice(idx,1); renderEndings(cfg.story.endings); markDirty('story'); }; tdOps.appendChild(btnDel);
+        tr.appendChild(tdId); tr.appendChild(tdLabel); tr.appendChild(tdOut); tr.appendChild(tdPr); tr.appendChild(tdWhen); tr.appendChild(tdOps);
+        stEndingsBody.appendChild(tr);
+      });
+      if (btnAddEnding) btnAddEnding.onclick = () => { cfg.story.endings.push({ id:'', label:'', outcome:'neutral', priority:0, when:{"any":[]} }); renderEndings(cfg.story.endings); markDirty('story'); };
+    }
+    if (stEndingsBody) renderEndings((cfg.story||{}).endings || []);
+
+    // scenes list UI
+    function renderScenesList() {
+      if (!stScenesTable) return;
+      const tbody = stScenesTable.querySelector('tbody');
+      tbody.innerHTML = '';
+      const map = cfg.story.scenes = Object.assign({}, cfg.story.scenes || {});
+      Object.entries(map).forEach(([sid, sc]) => {
+        const tr = document.createElement('tr');
+        const tdId=document.createElement('td'); tdId.textContent=sid; tr.appendChild(tdId);
+        const tdName=document.createElement('td'); const inNm=document.createElement('input'); inNm.type='text'; inNm.value=String((sc||{}).name||''); inNm.addEventListener('input',()=>{ (cfg.story.scenes[sid]||(cfg.story.scenes[sid]={})).name=inNm.value; markDirty('story'); }); tdName.appendChild(inNm); tr.appendChild(tdName);
+        const tdCnt=document.createElement('td'); try{ const n=Array.isArray((sc||{}).details)? (sc.details||[]).length:0; tdCnt.textContent=String(n);}catch(e){ tdCnt.textContent='0'; } tr.appendChild(tdCnt);
+        const tdOp=document.createElement('td');
+        const btnEd=document.createElement('button'); btnEd.className='sm'; btnEd.textContent='编辑'; btnEd.onclick=()=> openSceneEditor(sid);
+        const btnDel=document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.story.scenes[sid]; renderScenesList(); try{renderScenePositions();}catch(_e){}; markDirty('story'); };
+        tdOp.appendChild(btnEd); tdOp.appendChild(btnDel); tr.appendChild(tdOp);
+        tbody.appendChild(tr);
+      });
+      if (btnAddScene) btnAddScene.onclick = () => {
+        const id = prompt('新场景 ID (a-z0-9_-)');
+        if (!id) return;
+        if ((cfg.story.scenes||{})[id]) { alert('已存在同名场景'); return; }
+        (cfg.story.scenes||(cfg.story.scenes={}))[id] = { name:'', details:[] };
+        renderScenesList(); try{renderScenePositions();}catch(_e){}; markDirty('story');
+      };
+    }
+    function openSceneEditor(sid) {
+      if (!stSceneEditor) return;
+      stSceneEditor.classList.remove('hidden');
+      stSceneEditId && (stSceneEditId.value = sid);
+      const sc = (cfg.story.scenes[sid] = Object.assign({ name:'', details:[] }, cfg.story.scenes[sid] || {}));
+      if (stSceneEditName) {
+        stSceneEditName.value = sc.name || '';
+        stSceneEditName.oninput = () => { cfg.story.scenes[sid].name = stSceneEditName.value; markDirty('story'); };
+      }
+      if (stSceneEditDetails) {
+        clearListEdit(stSceneEditDetails);
+        const arr = Array.isArray(sc.details) ? sc.details.slice() : [];
+        arr.forEach((val, idx) => addListRow(stSceneEditDetails, val, v => { cfg.story.scenes[sid].details[idx] = v; markDirty('story'); }, () => {
+          cfg.story.scenes[sid].details.splice(idx,1); openSceneEditor(sid); markDirty('story');
+        }));
+        cfg.story.scenes[sid].details = arr;
+        if (btnAddSceneDetail) btnAddSceneDetail.onclick = () => { cfg.story.scenes[sid].details.push(''); openSceneEditor(sid); markDirty('story'); };
+      }
+    }
+
+    // entrances UI
+    function renderEntrancesTable() {
+      if (!stEntrTable) return;
+      const tbody = stEntrTable.querySelector('tbody');
+      tbody.innerHTML = '';
+      const map = cfg.story.entrances = Object.assign({}, cfg.story.entrances || {});
+      const mkInput=(type,val,on)=>{ const i=document.createElement('input'); i.type=type; i.value=(val!=null? String(val):''); i.addEventListener('input',()=>on(i.value)); return i; };
+      Object.entries(map).forEach(([eid, e]) => {
+        const tr = document.createElement('tr');
+        const tdId=document.createElement('td'); tdId.textContent=eid; tr.appendChild(tdId);
+        const tdLabel=document.createElement('td'); const inLbl=mkInput('text', (e||{}).label||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).label=v; markDirty('story'); }); tdLabel.appendChild(inLbl); tr.appendChild(tdLabel);
+        const tdFrom=document.createElement('td'); const inFrom=mkInput('text', (e||{}).from_scene||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).from_scene=v; markDirty('story'); }); tdFrom.appendChild(inFrom); tr.appendChild(tdFrom);
+        const tdTo=document.createElement('td'); const inTo=mkInput('text', (e||{}).to_scene||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).to_scene=v; markDirty('story'); }); tdTo.appendChild(inTo); tr.appendChild(tdTo);
+        const at = Array.isArray((e||{}).at) ? (e.at||[]) : [];
+        const sp = Array.isArray((e||{}).spawn) ? (e.spawn||[]) : [];
+        const tdAx=document.createElement('td'); const inAx=mkInput('number', (Array.isArray(at)&&at.length>0? String(at[0]) : ''), v=>{ const A=(cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})); const arr=Array.isArray(A.at)?A.at:[0,0]; arr[0]=parseInt(v||'0',10)||0; A.at=arr; markDirty('story'); }); tdAx.appendChild(inAx); tr.appendChild(tdAx);
+        const tdAy=document.createElement('td'); const inAy=mkInput('number', (Array.isArray(at)&&at.length>1? String(at[1]) : ''), v=>{ const A=(cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})); const arr=Array.isArray(A.at)?A.at:[0,0]; arr[1]=parseInt(v||'0',10)||0; A.at=arr; markDirty('story'); }); tdAy.appendChild(inAy); tr.appendChild(tdAy);
+        const tdSx=document.createElement('td'); const inSx=mkInput('number', (Array.isArray(sp)&&sp.length>0? String(sp[0]) : ''), v=>{ const A=(cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})); const arr=Array.isArray(A.spawn)?A.spawn:[0,0]; arr[0]=parseInt(v||'0',10)||0; A.spawn=arr; markDirty('story'); }); tdSx.appendChild(inSx); tr.appendChild(tdSx);
+        const tdSy=document.createElement('td'); const inSy=mkInput('number', (Array.isArray(sp)&&sp.length>1? String(sp[1]) : ''), v=>{ const A=(cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})); const arr=Array.isArray(A.spawn)?A.spawn:[0,0]; arr[1]=parseInt(v||'0',10)||0; A.spawn=arr; markDirty('story'); }); tdSy.appendChild(inSy); tr.appendChild(tdSy);
+        const tdDesc=document.createElement('td'); const inD=mkInput('text', (e||{}).desc||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).desc=v; markDirty('story'); }); tdDesc.appendChild(inD); tr.appendChild(tdDesc);
+        const tdOps=document.createElement('td'); const btnDel=document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.story.entrances[eid]; renderEntrancesTable(); markDirty('story'); }; tdOps.appendChild(btnDel); tr.appendChild(tdOps);
+        tbody.appendChild(tr);
+      });
+      if (btnAddEntrance) btnAddEntrance.onclick = () => {
+        const id = prompt('新入口 ID');
+        if (!id) return;
+        if ((cfg.story.entrances||{})[id]) { alert('已存在同名入口'); return; }
+        (cfg.story.entrances||(cfg.story.entrances={}))[id] = { label:'', from_scene:'', to_scene:'', at:[0,0], spawn:[0,0], desc:'' };
+        renderEntrancesTable(); markDirty('story');
+      };
+    }
+
+    // initial scenes UI
+    function renderInitialScenes() {
+      if (!stInitScenesTable) return;
+      const tbody = stInitScenesTable.querySelector('tbody');
+      tbody.innerHTML = '';
+      const map = cfg.story.initial_scenes = Object.assign({}, cfg.story.initial_scenes || {});
+      Object.entries(map).forEach(([name, sid]) => {
+        const tr=document.createElement('tr');
+        const tdN=document.createElement('td'); tdN.textContent=String(name); tr.appendChild(tdN);
+        const tdS=document.createElement('td'); const inS=document.createElement('input'); inS.type='text'; inS.value=String(sid||''); inS.addEventListener('input',()=>{ cfg.story.initial_scenes[name] = inS.value; markDirty('story'); }); tdS.appendChild(inS); tr.appendChild(tdS);
+        const tdOp=document.createElement('td'); const btnDel=document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.story.initial_scenes[name]; renderInitialScenes(); markDirty('story'); }; tdOp.appendChild(btnDel); tr.appendChild(tdOp);
+        tbody.appendChild(tr);
+      });
+      // populate actor select
+      if (stInitSceneNameSel) {
+        stInitSceneNameSel.innerHTML = '';
+        const names = Object.keys(cfg.characters || {});
+        const ph = document.createElement('option'); ph.value=''; ph.textContent='选择角色…'; stInitSceneNameSel.appendChild(ph);
+        names.forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; stInitSceneNameSel.appendChild(o); });
+      }
+      if (btnSetInitScene) btnSetInitScene.onclick = () => {
+        const nm = stInitSceneNameSel ? String(stInitSceneNameSel.value||'').trim() : '';
+        const sid = stInitSceneId ? String(stInitSceneId.value||'').trim() : '';
+        if (!nm || !sid) { alert('请选择角色并填写场景ID'); return; }
+        (cfg.story.initial_scenes||(cfg.story.initial_scenes={}))[nm] = sid;
+        renderInitialScenes(); markDirty('story');
+      };
+    }
+
+    // scene positions UI
+    function renderScenePositions() {
+      if (!stScenePosTable) return;
+      const scenes = Object.keys(cfg.story.scenes || {});
+      if (stScenePosSel) {
+        stScenePosSel.innerHTML = '';
+        const ph=document.createElement('option'); ph.value=''; ph.textContent='选择场景…'; stScenePosSel.appendChild(ph);
+        scenes.forEach(id=>{ const o=document.createElement('option'); o.value=id; o.textContent=id; stScenePosSel.appendChild(o); });
+      }
+      const ensure = (s)=>{ cfg.story.scene_positions = Object.assign({}, cfg.story.scene_positions || {}); if (!cfg.story.scene_positions[s]) cfg.story.scene_positions[s] = {}; return cfg.story.scene_positions[s]; };
+      const renderFor = (sid) => {
+        const tbody = stScenePosTable.querySelector('tbody');
+        tbody.innerHTML = '';
+        const mp = ensure(sid);
+        Object.entries(mp).forEach(([nm, arr]) => {
+          const tr=document.createElement('tr');
+          const tdN=document.createElement('td'); tdN.textContent=String(nm); tr.appendChild(tdN);
+          const tdX=document.createElement('td'); const inX=document.createElement('input'); inX.type='number'; inX.value = Array.isArray(arr)&&arr.length>0? String(arr[0]):''; inX.addEventListener('input',()=>{ const v=mp[nm]||[0,0]; v[0]=parseInt(inX.value||'0',10)||0; mp[nm]=v; markDirty('story'); }); tdX.appendChild(inX); tr.appendChild(tdX);
+          const tdY=document.createElement('td'); const inY=document.createElement('input'); inY.type='number'; inY.value = Array.isArray(arr)&&arr.length>1? String(arr[1]):''; inY.addEventListener('input',()=>{ const v=mp[nm]||[0,0]; v[1]=parseInt(inY.value||'0',10)||0; mp[nm]=v; markDirty('story'); }); tdY.appendChild(inY); tr.appendChild(tdY);
+          const tdOp=document.createElement('td'); const btnDel=document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete mp[nm]; renderFor(sid); markDirty('story'); }; tdOp.appendChild(btnDel); tr.appendChild(tdOp);
+          tbody.appendChild(tr);
+        });
+        // populate actor select from characters
+        if (stScenePosNameSel) {
+          stScenePosNameSel.innerHTML='';
+          const ph = document.createElement('option'); ph.value=''; ph.textContent='选择角色…'; stScenePosNameSel.appendChild(ph);
+          Object.keys(cfg.characters||{}).forEach(n=>{ const o=document.createElement('option'); o.value=n; o.textContent=n; stScenePosNameSel.appendChild(o); });
+        }
+        if (btnAddScenePos) btnAddScenePos.onclick = () => {
+          const nm = stScenePosNameSel ? String(stScenePosNameSel.value||'').trim() : '';
+          const x = parseInt(stScenePosX ? stScenePosX.value||'0' : '0', 10) || 0;
+          const y = parseInt(stScenePosY ? stScenePosY.value||'0' : '0', 10) || 0;
+          if (!nm) { alert('请选择角色'); return; }
+          mp[nm] = [x,y];
+          renderFor(sid); markDirty('story');
+        };
+      };
+      // wire change
+      if (stScenePosSel) stScenePosSel.onchange = () => { const sid = String(stScenePosSel.value||''); if (sid) renderFor(sid); };
+      // auto-select first scene
+      try { if (stScenePosSel && !stScenePosSel.value && scenes.length>0) { stScenePosSel.value = scenes[0]; renderFor(scenes[0]); } } catch(e){}
+    }
+
+    renderScenesList();
+    renderEntrancesTable();
+    renderInitialScenes();
+    renderScenePositions();
+    try { renderTimelineForm((cfg.story||{}).events || []); } catch(e){}
+
     // positions
     const tbody = stTbl.querySelector('tbody');
     tbody.innerHTML = '';
@@ -1243,11 +1613,12 @@
 
   async function loadAllConfigs() {
     // Load latest configs and state snapshot for helpers
-    const [stRes, wpRes, chRes, stState] = await Promise.all([
+    const [stRes, wpRes, chRes, stState, artsRes] = await Promise.all([
       fetch('/api/config/story').then(r=>r.json()).catch(()=>({data:{}})),
       fetch('/api/config/weapons').then(r=>r.json()).catch(()=>({data:{}})),
       fetch('/api/config/characters').then(r=>r.json()).catch(()=>({data:{}})),
       fetch('/api/state').then(r=>r.json()).catch(()=>({state:null})),
+      fetch('/api/config/arts').then(r=>r.json()).catch(()=>({data:{}})),
     ]);
     lastState = (stState||{}).state || lastState || {};
     renderCharactersForm((chRes||{}).data||{});
@@ -1267,6 +1638,8 @@
     renderStoryForm(cfg.story, lastState);
     // Weapons unchanged
     renderWeaponsForm((wpRes||{}).data||{});
+    // Arts
+    renderArtsForm((artsRes||{}).data||{});
   }
 
   function storyCollect() {
@@ -1287,6 +1660,12 @@
     const out = JSON.parse(JSON.stringify(original.story || {}));
     out.scene = JSON.parse(JSON.stringify(s));
     out.initial_positions = pos;
+    if (cfg.story.scenes) out.scenes = JSON.parse(JSON.stringify(cfg.story.scenes));
+    if (cfg.story.entrances) out.entrances = JSON.parse(JSON.stringify(cfg.story.entrances));
+    if (cfg.story.initial_scenes) out.initial_scenes = JSON.parse(JSON.stringify(cfg.story.initial_scenes));
+    if (cfg.story.scene_positions) out.scene_positions = JSON.parse(JSON.stringify(cfg.story.scene_positions));
+    if (Array.isArray(cfg.story.endings)) out.endings = JSON.parse(JSON.stringify(cfg.story.endings));
+    if (Array.isArray(cfg.story.events)) out.events = JSON.parse(JSON.stringify(cfg.story.events));
     return out;
   }
 
@@ -1326,8 +1705,10 @@
   async function saveActive(restart) {
     try {
       let name = activeTab;
+      // timeline edits are stored in story container; write to story endpoint
+      const endpointName = (name === 'timeline') ? 'story' : name;
       let data = null;
-      if (name === 'story') {
+      if (name === 'story' || name === 'timeline') {
         // commit local edits into container; never write legacy active_id
         commitLocalStoryEdits();
         let merged = {};
@@ -1341,8 +1722,9 @@
         data = merged;
       }
       else if (name === 'weapons') data = weaponsCollect();
+      else if (name === 'arts') data = artsCollect();
       else if (name === 'characters') data = charactersCollect();
-      const res = await fetch(`/api/config/${name}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+      const res = await fetch(`/api/config/${endpointName}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
       if (!res.ok) {
         const t = await res.text();
         throw new Error(t || '保存失败');
@@ -1390,6 +1772,304 @@
   for (const b of tabBtns) {
     b.onclick = () => setActiveTab(b.getAttribute('data-tab'));
   }
+
+  // ===== Arts form =====
+  function renderArtsForm(data) {
+    // Deep clone for editing
+    original.arts = JSON.parse(JSON.stringify(data || {}));
+    cfg.arts = JSON.parse(JSON.stringify(data || {}));
+    dirty.arts = false;
+    if (!artsTable) return;
+    const tbody = artsTable.querySelector('tbody');
+    const abilities = ['STR','DEX','CON','INT','POW'];
+    const skillList = ['Arts_Control','Arts_Offense','Perception','Dodge','FirstAid','Firearms_Handgun','Firearms_Rifle_Crossbow'];
+    const fill = () => {
+      tbody.innerHTML = '';
+      Object.entries(cfg.arts || {}).forEach(([id, a]) => {
+        const tr = document.createElement('tr');
+        const td = (el) => { const td=document.createElement('td'); td.appendChild(el); return td; };
+        // ID (readonly)
+        const inId = document.createElement('input'); inId.type='text'; inId.value=id; inId.disabled=true;
+        // label
+        const inLabel = document.createElement('input'); inLabel.type='text'; inLabel.value=(a.label||''); inLabel.oninput=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).label=inLabel.value; markDirty('arts'); };
+        // cast_skill
+        const selCast = document.createElement('select'); skillList.forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; selCast.appendChild(o); }); selCast.value=String(a.cast_skill||'Arts_Control'); selCast.onchange=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).cast_skill=selCast.value; markDirty('arts'); };
+        // resist
+        const selRes = document.createElement('select'); ['Arts_Resist','Dodge'].forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; selRes.appendChild(o); }); selRes.value=String(a.resist||'Arts_Resist'); selRes.onchange=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).resist=selRes.value; markDirty('arts'); };
+        // range_steps
+        const inRange = document.createElement('input'); inRange.type='number'; inRange.value=(a.range_steps!=null? a.range_steps:6); inRange.oninput=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).range_steps=parseInt(inRange.value||'6',10)||6; markDirty('arts'); };
+        // damage
+        const inDmg = document.createElement('input'); inDmg.type='text'; inDmg.value=(a.damage||''); inDmg.placeholder='如 1d6+1d4'; inDmg.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); if (inDmg.value.trim()) m.damage=inDmg.value.trim(); else delete m.damage; markDirty('arts'); };
+        // control.effect
+        const inCtl = document.createElement('input'); inCtl.type='text'; inCtl.value=((a.control||{}).effect||''); inCtl.placeholder='silenced/restrained/sleep/...'; inCtl.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.control=m.control||{}; m.control.effect=inCtl.value.trim(); if (!m.control.effect) delete m.control.effect; markDirty('arts'); };
+        // control.duration
+        const inDur = document.createElement('input'); inDur.type='text'; inDur.value=((a.control||{}).duration||''); inDur.placeholder='1 或 表达式'; inDur.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.control=m.control||{}; m.control.duration=inDur.value.trim(); if (!m.control.duration) delete m.control.duration; markDirty('arts'); };
+        // mp (cost/variable/max)
+        const inCost = document.createElement('input'); inCost.type='number'; inCost.value=((a.mp||{}).cost!=null? a.mp.cost:0); inCost.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.mp=m.mp||{}; m.mp.cost=parseInt(inCost.value||'0',10)||0; markDirty('arts'); };
+        const inVar = document.createElement('input'); inVar.type='checkbox'; inVar.checked=!!((a.mp||{}).variable); inVar.onchange=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.mp=m.mp||{}; m.mp.variable=!!inVar.checked; markDirty('arts'); };
+        const inMax = document.createElement('input'); inMax.type='number'; inMax.value=((a.mp||{}).max!=null? a.mp.max:0); inMax.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.mp=m.mp||{}; m.mp.max=parseInt(inMax.value||'0',10)||0; markDirty('arts'); };
+        const mpWrap = document.createElement('div'); mpWrap.className='row'; mpWrap.appendChild(inCost); const lbl=document.createElement('label'); lbl.textContent=' 可变'; lbl.style.marginLeft='4px'; const wrapVar=document.createElement('span'); wrapVar.appendChild(inVar); wrapVar.appendChild(lbl); mpWrap.appendChild(wrapVar); mpWrap.appendChild(inMax);
+        // tags (comma separated)
+        const inTags = document.createElement('input'); inTags.type='text'; inTags.value=Array.isArray(a.tags)? a.tags.join(',') : ''; inTags.placeholder='tag1,tag2'; inTags.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); const v=inTags.value.trim(); m.tags = v? v.split(/\s*,\s*/).filter(Boolean) : []; markDirty('arts'); };
+        // desc
+        const inDesc = document.createElement('input'); inDesc.type='text'; inDesc.value=(a.desc||''); inDesc.oninput=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).desc=inDesc.value; markDirty('arts'); };
+        // ops
+        const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.arts[id]; fill(); markDirty('arts'); };
+        tr.appendChild(td(inId)); tr.appendChild(td(inLabel)); tr.appendChild(td(selCast)); tr.appendChild(td(selRes)); tr.appendChild(td(inRange)); tr.appendChild(td(inDmg)); tr.appendChild(td(inCtl)); tr.appendChild(td(inDur)); tr.appendChild(td(mpWrap)); tr.appendChild(td(inTags)); tr.appendChild(td(inDesc)); tr.appendChild(td(btnDel));
+        tbody.appendChild(tr);
+      });
+    };
+    fill();
+    if (btnAddArt) btnAddArt.onclick = () => {
+      let id = String(prompt('输入术式 ID（可留空自动生成）')||'').trim();
+      if (!id) { const base='art_'; let i=1; id=base+i; while ((cfg.arts||{})[id]) { i++; id=base+i; } }
+      if ((cfg.arts||{})[id]) { alert('已存在同名 ID'); return; }
+      (cfg.arts||(cfg.arts={}))[id] = { label:'', cast_skill:'Arts_Control', resist:'Arts_Resist', range_steps:6, mp:{ cost:0, variable:false, max:0 }, tags:[] };
+      fill(); markDirty('arts');
+    };
+  }
+
+  function artsCollect() {
+    const out = {};
+    for (const id of Object.keys(cfg.arts || {})) {
+      out[id] = JSON.parse(JSON.stringify(cfg.arts[id] || {}));
+      // 清理空字段
+      if (out[id].damage === '') delete out[id].damage;
+      if (out[id].desc === '') delete out[id].desc;
+      if (out[id].control && !out[id].control.effect && !out[id].control.duration) delete out[id].control;
+      if (out[id].mp && out[id].mp.max==null && out[id].mp.variable==null && out[id].mp.cost==null) delete out[id].mp;
+    }
+    return out;
+  }
+
+  // ===== Timeline form =====
+  function renderTimelineForm(list) {
+    if (!tlTable) return;
+    cfg.story.events = Array.isArray(list) ? JSON.parse(JSON.stringify(list)) : [];
+    const tbody = tlTable.querySelector('tbody');
+    const fill = () => {
+      tbody.innerHTML = '';
+      cfg.story.events.forEach((ev, idx) => {
+        const tr = document.createElement('tr');
+        const td = (el) => { const td=document.createElement('td'); td.appendChild(el); return td; };
+        const inName = document.createElement('input'); inName.type='text'; inName.value=String(ev.name||''); inName.oninput=()=>{ cfg.story.events[idx].name = inName.value; markDirty('story'); };
+        const inTime = document.createElement('input'); inTime.type='text'; inTime.placeholder='08:30'; inTime.value=String(ev.time || ev.time_str || ''); inTime.oninput=()=>{ cfg.story.events[idx].time = inTime.value.trim(); delete cfg.story.events[idx].at; markDirty('story'); };
+        const inNote = document.createElement('input'); inNote.type='text'; inNote.value=String(ev.note||''); inNote.oninput=()=>{ cfg.story.events[idx].note = inNote.value; markDirty('story'); };
+        const taEff = document.createElement('textarea'); taEff.rows=3; try{ taEff.value = ev.effects? JSON.stringify(ev.effects, null, 2) : ''; } catch { taEff.value=''; }
+        taEff.oninput=()=>{ try { const arr = taEff.value.trim()? JSON.parse(taEff.value): []; taEff.style.borderColor=''; cfg.story.events[idx].effects = arr; markDirty('story'); } catch(e){ taEff.style.borderColor='#e11d48'; } };
+        const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ cfg.story.events.splice(idx,1); fill(); markDirty('story'); };
+        tr.appendChild(td(inName)); tr.appendChild(td(inTime)); tr.appendChild(td(inNote)); tr.appendChild(td(taEff)); tr.appendChild(td(btnDel));
+        tbody.appendChild(tr);
+      });
+    };
+    fill();
+    if (btnAddEvent) btnAddEvent.onclick = () => { cfg.story.events.push({ name:'', time:'', note:'', effects:[] }); fill(); markDirty('story'); };
+  }
+
+  // ======== When Builder (完整树编辑器) ========
+  let _whenDraft = null;          // internal tree being edited
+  let _whenEditEndingIdx = -1;    // which ending we edit
+
+  function _toInternalWhen(node) {
+    // Convert engine shape -> internal { _type: 'any'|'all'|'not', children: [...] } or leaf { kind, ... }
+    if (!node || typeof node !== 'object') return null;
+    const keys = Object.keys(node);
+    if (keys.length === 1 && (keys[0] === 'any' || keys[0] === 'all' || keys[0] === 'not')) {
+      const k = keys[0];
+      const raw = node[k];
+      const children = Array.isArray(raw) ? raw.map(_toInternalWhen).filter(Boolean) : (raw ? [_toInternalWhen(raw)] : []);
+      return { _type: k, children };
+    }
+    // leaf conditions: pass-through but tag with kind
+    const leafKinds = ['objectives','actors_alive','actors_dead','hostiles_present','marks_contains','location_is','tension_at_least','tension_at_most','participants_alive_at_least','participants_alive_at_most','time_before','time_at_least'];
+    for (const k of leafKinds) {
+      if (k in node) return { kind: k, value: JSON.parse(JSON.stringify(node[k])) };
+    }
+    // direct leaf with fields (e.g., { time_before: '08:30' }) already handled above
+    // unknown -> null
+    return null;
+  }
+
+  function _toEngineWhen(internal) {
+    if (!internal || typeof internal !== 'object') return null;
+    if (internal._type) {
+      const kids = Array.isArray(internal.children) ? internal.children.map(_toEngineWhen).filter(Boolean) : [];
+      if (internal._type === 'not') {
+        return { not: (kids[0] || null) };
+      }
+      return { [internal._type]: kids };
+    }
+    if (internal.kind) {
+      return { [internal.kind]: JSON.parse(JSON.stringify(internal.value)) };
+    }
+    return null;
+  }
+
+  function openWhenEditor(endingIdx) {
+    if (!whenModal || !whenTreeEl) return;
+    _whenEditEndingIdx = endingIdx;
+    const en = (cfg.story.endings || [])[endingIdx] || {};
+    const w = en.when || { any: [] };
+    _whenDraft = _toInternalWhen(w) || { _type: 'any', children: [] };
+    whenModal.classList.remove('hidden');
+    whenModal.setAttribute('aria-hidden', 'false');
+    renderWhenTree();
+  }
+  function closeWhenEditor() {
+    if (!whenModal) return;
+    whenModal.classList.add('hidden');
+    whenModal.setAttribute('aria-hidden', 'true');
+    _whenDraft = null; _whenEditEndingIdx = -1;
+  }
+
+  function _arrayInput(value, placeholder, onChange) {
+    const wrap = document.createElement('div');
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.placeholder = placeholder || 'a,b,c';
+    inp.value = Array.isArray(value) ? value.join(',') : (value || '');
+    inp.oninput = () => {
+      const v = inp.value.trim();
+      onChange(v ? v.split(/\s*,\s*/).filter(Boolean) : []);
+    };
+    wrap.appendChild(inp); return wrap;
+  }
+
+  function _namedSelect(options, value, onChange) {
+    const sel = document.createElement('select');
+    const ph = document.createElement('option'); ph.value=''; ph.textContent='请选择'; sel.appendChild(ph);
+    options.forEach(v=>{ const o=document.createElement('option'); o.value=v; o.textContent=v; sel.appendChild(o); });
+    sel.value = (Array.isArray(value)? value[0]: value) || '';
+    sel.onchange = () => onChange(sel.value);
+    return sel;
+  }
+
+  function renderWhenTree() {
+    if (!whenTreeEl) return;
+    whenTreeEl.innerHTML = '';
+    const root = _whenDraft || { _type:'any', children: [] };
+    whenTreeEl.appendChild(renderWhenNode(root, []));
+  }
+
+  function renderWhenNode(node, path) {
+    const wrap = document.createElement('div');
+    wrap.className = 'when-node';
+    const head = document.createElement('div'); head.className='head'; wrap.appendChild(head);
+    const actions = document.createElement('div'); actions.className='when-actions'; wrap.appendChild(actions);
+
+    const suggest = {
+      actors: Object.keys(cfg.characters || {}),
+      objectives: ((cfg.story||{}).scene||{}).objectives || [],
+      scenes: Object.keys((cfg.story||{}).scenes || {}),
+    };
+
+    // Helper to locate node by path
+    const getNode = (p) => p.reduce((acc, i) => acc.children[i], _whenDraft);
+    const setNode = (p, val) => {
+      if (p.length === 0) { _whenDraft = val; return; }
+      const parent = p.slice(0,-1).reduce((acc, i) => acc.children[i], _whenDraft);
+      parent.children[p[p.length-1]] = val;
+    };
+    const removeNode = (p) => {
+      if (p.length === 0) return; // do not remove root
+      const parent = p.slice(0,-1).reduce((acc, i) => acc.children[i], _whenDraft);
+      parent.children.splice(p[p.length-1], 1);
+    };
+
+    if (node._type) {
+      // Group node
+      const lab = document.createElement('span'); lab.textContent = '组：'; head.appendChild(lab);
+      const sel = document.createElement('select'); sel.className='fit-select'; ['any','all','not'].forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=t; sel.appendChild(o); }); sel.value=node._type; sel.onchange=()=>{ node._type = sel.value; renderWhenTree(); }; head.appendChild(sel);
+      if (path.length > 0) { const del=document.createElement('button'); del.className='sm'; del.textContent='删除本组'; del.onclick=()=>{ removeNode(path); renderWhenTree(); }; head.appendChild(del); }
+      const kids = document.createElement('div'); kids.className='when-children'; wrap.appendChild(kids);
+      node.children = Array.isArray(node.children) ? node.children : [];
+      node.children.forEach((ch, idx) => { kids.appendChild(renderWhenNode(ch, path.concat(idx))); });
+      // add child controls
+      const addSel = document.createElement('select'); addSel.className='fit-select';
+      ['any','all','not','objectives','time_before','time_at_least','actors_alive','actors_dead','participants_alive_at_least','participants_alive_at_most','hostiles_present','marks_contains','tension_at_least','tension_at_most','location_is'].forEach(k=>{ const o=document.createElement('option'); o.value=k; o.textContent=k; addSel.appendChild(o); });
+      const btnAdd = document.createElement('button'); btnAdd.className='sm'; btnAdd.textContent='添加子条件'; btnAdd.onclick=()=>{
+        const k = addSel.value;
+        if (k==='any' || k==='all' || k==='not') node.children.push({ _type: k, children: [] });
+        else node.children.push(defaultLeaf(k));
+        renderWhenTree();
+      };
+      actions.appendChild(addSel); actions.appendChild(btnAdd);
+      return wrap;
+    }
+    // Leaf nodes UI
+    const kind = node.kind || 'objectives';
+    const selK = document.createElement('select'); selK.className='fit-select';
+    ['objectives','time_before','time_at_least','actors_alive','actors_dead','participants_alive_at_least','participants_alive_at_most','hostiles_present','marks_contains','tension_at_least','tension_at_most','location_is'].forEach(k=>{ const o=document.createElement('option'); o.value=k; o.textContent=k; selK.appendChild(o); });
+    selK.value = kind;
+    selK.onchange = () => {
+      const repl = defaultLeaf(selK.value);
+      setNode(path, repl); renderWhenTree();
+    };
+    head.appendChild(selK);
+    if (path.length > 0) { const del=document.createElement('button'); del.className='sm'; del.textContent='删除'; del.onclick=()=>{ removeNode(path); renderWhenTree(); }; head.appendChild(del); }
+
+    const form = document.createElement('div'); form.className='when-children'; wrap.appendChild(form);
+    const v = node.value || {};
+
+    const label = (t)=>{ const l=document.createElement('label'); l.className='lbl'; l.textContent=t; form.appendChild(l); };
+    const addRow = (el)=>{ form.appendChild(el); };
+
+    if (kind === 'objectives') {
+      label('目标名称（逗号分隔）'); addRow(_arrayInput(v.names || suggest.objectives, '目标1,目标2', names=>{ node.value = Object.assign({}, v, { names }); }));
+      label('要求'); const selReq=document.createElement('select'); selReq.className='fit-select'; ['all','any'].forEach(x=>{ const o=document.createElement('option'); o.value=x; o.textContent=x; selReq.appendChild(o); }); selReq.value = (v.require||'all'); selReq.onchange=()=>{ node.value = Object.assign({}, node.value, { require: selReq.value }); }; addRow(selReq);
+      label('状态'); const selSt=document.createElement('select'); selSt.className='fit-select'; ['done','blocked','any'].forEach(x=>{ const o=document.createElement('option'); o.value=x; o.textContent=x; selSt.appendChild(o); }); selSt.value=(v.status||'done'); selSt.onchange=()=>{ node.value = Object.assign({}, node.value, { status: selSt.value }); }; addRow(selSt);
+    } else if (kind === 'time_before' || kind === 'time_at_least') {
+      label('时间（HH:MM 或 分钟）'); const inp=document.createElement('input'); inp.type='text'; inp.placeholder='08:30'; inp.value=String(v||''); inp.oninput=()=>{ node.value = inp.value; }; addRow(inp);
+    } else if (kind === 'actors_alive' || kind === 'actors_dead') {
+      label('角色（逗号分隔）'); addRow(_arrayInput((v.names||suggest.actors), 'Amiya,Doctor', names=>{ node.value = Object.assign({}, node.value, { names }); }));
+      label('要求'); const selReq=document.createElement('select'); selReq.className='fit-select'; ['all','any'].forEach(x=>{ const o=document.createElement('option'); o.value=x; o.textContent=x; selReq.appendChild(o); }); selReq.value=(v.require||'all'); selReq.onchange=()=>{ node.value = Object.assign({}, node.value, { require: selReq.value }); }; addRow(selReq);
+    } else if (kind === 'participants_alive_at_least' || kind === 'participants_alive_at_most') {
+      label('人数'); const inp=document.createElement('input'); inp.type='number'; inp.value=String(v||0); inp.oninput=()=>{ node.value = parseInt(inp.value||'0',10)||0; }; addRow(inp);
+    } else if (kind === 'hostiles_present') {
+      label('是否存在敌对'); const sel=document.createElement('select'); sel.className='fit-select'; [{v:true,t:'是'}, {v:false,t:'否'}].forEach(o=>{ const op=document.createElement('option'); op.value=String(o.v); op.textContent=o.t; sel.appendChild(op); }); sel.value=String((typeof v==='object'? v.value : v) ?? true);
+      sel.onchange=()=>{ const cur = (v && typeof v==='object')? v: { value: true }; const want=(sel.value==='true'); node.value = Object.assign({}, cur, { value: want }); }; addRow(sel);
+      label('阈值（可选）'); const thr=document.createElement('input'); thr.type='number'; thr.placeholder='-10'; thr.value=String((v && v.threshold!=null) ? v.threshold : ''); thr.oninput=()=>{ const val=thr.value.trim(); const cur=(v&&typeof v==='object')? v: { value: (sel.value==='true') }; if (val==='') { delete cur.threshold; } else { cur.threshold=parseInt(val||'0',10)||0; } node.value = cur; }; addRow(thr);
+    } else if (kind === 'marks_contains') {
+      label('标记（逗号分隔）'); addRow(_arrayInput(v||[], 'mark1,mark2', arr=>{ node.value = arr; }));
+    } else if (kind === 'tension_at_least' || kind === 'tension_at_most') {
+      label('紧张度'); const inp=document.createElement('input'); inp.type='number'; inp.value=String(v||0); inp.oninput=()=>{ node.value = parseInt(inp.value||'0',10)||0; }; addRow(inp);
+    } else if (kind === 'location_is') {
+      label('地点'); addRow(_namedSelect(suggest.scenes, v, vv=>{ node.value = vv; }));
+    }
+
+    return wrap;
+  }
+
+  function defaultLeaf(kind) {
+    switch(kind){
+      case 'objectives': return { kind, value: { names: (((cfg.story||{}).scene||{}).objectives||[]), require:'all', status:'done' } };
+      case 'time_before': return { kind, value: '08:30' };
+      case 'time_at_least': return { kind, value: '08:30' };
+      case 'actors_alive': return { kind, value: { names: Object.keys(cfg.characters||{}), require: 'all' } };
+      case 'actors_dead': return { kind, value: { names: [], require: 'any' } };
+      case 'participants_alive_at_least': return { kind, value: 1 };
+      case 'participants_alive_at_most': return { kind, value: 0 };
+      case 'hostiles_present': return { kind, value: { value: true, threshold: -10 } };
+      case 'marks_contains': return { kind, value: [] };
+      case 'tension_at_least': return { kind, value: 1 };
+      case 'tension_at_most': return { kind, value: 1 };
+      case 'location_is': return { kind, value: '' };
+      default: return { kind: 'objectives', value: { names: [], require: 'all', status: 'done' } };
+    }
+  }
+
+  // Wire modal buttons
+  if (btnWhenCancel) btnWhenCancel.onclick = () => closeWhenEditor();
+  if (btnWhenOk) btnWhenOk.onclick = () => {
+    try {
+      const eng = _toEngineWhen(_whenDraft);
+      if (_whenEditEndingIdx >= 0 && cfg.story && Array.isArray(cfg.story.endings)) {
+        cfg.story.endings[_whenEditEndingIdx].when = eng;
+        // Refresh endings table and close
+        renderStoryForm(cfg.story, lastState || null);
+      }
+    } catch(e) { /* ignore */ }
+    closeWhenEditor();
+  };
   // Story multi-selector events
   function sanitizeStoryId(s) {
     try { return String(s||'').trim().toLowerCase().replace(/\s+/g,'_'); } catch { return ''; }
