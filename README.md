@@ -129,6 +129,17 @@ repo/
 
 ## 常见问题
 
+## 发布前端到 GitHub Pages
+
+- 一键发布：
+  - ./scripts/deploy_frontend.sh  # 默认从 main 的 web/ 同步到 gh-pages
+  - 或指定分支：./scripts/deploy_frontend.sh feat/your-branch
+- 脚本会：
+  - 将 web/index.html、app.js、style.css、config.js 同步到 gh-pages 根目录
+  - 在 index.html 为静态资源追加 ?v=<短哈希> 以规避缓存
+  - 提交并推送 gh-pages
+- 注意：运行前需保证工作区无未提交改动。
+
 - `ModuleNotFoundError: agentscope`：确认已在 `npc-talk` 环境中，并已按 `environment.yml` 安装。
 - Kimi 报错/无响应：检查 `MOONSHOT_API_KEY`、网络连通、`KIMI_BASE_URL` 与模型名。
 
