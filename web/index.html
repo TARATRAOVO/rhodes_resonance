@@ -87,59 +87,70 @@
             <button id="btnStoryRename" class="sm">重命名</button>
             <button id="btnStoryDelete" class="sm danger">删除</button>
           </div>
-          <div class="grid2">
-            <div>
-              <label class="lbl">场景名</label>
-              <input id="stSceneName" type="text" />
+
+          <div class="section">
+            <h4 class="h">基本信息</h4>
+            <div class="grid2">
+              <div>
+                <label class="lbl">场景名</label>
+                <input id="stSceneName" type="text" />
+              </div>
+              <div>
+                <label class="lbl">时间</label>
+                <input id="stSceneTime" type="text" placeholder="08:00" />
+              </div>
+              <div>
+                <label class="lbl">天气</label>
+                <input id="stSceneWeather" list="weatherList" type="text" placeholder="overcast" />
+                <datalist id="weatherList">
+                  <option value="sunny"></option>
+                  <option value="overcast"></option>
+                  <option value="rain"></option>
+                  <option value="storm"></option>
+                  <option value="snow"></option>
+                </datalist>
+              </div>
             </div>
-            <div>
-              <label class="lbl">时间</label>
-              <input id="stSceneTime" type="text" placeholder="08:00" />
-            </div>
-            <div>
-              <label class="lbl">天气</label>
-              <input id="stSceneWeather" list="weatherList" type="text" placeholder="overcast" />
-              <datalist id="weatherList">
-                <option value="sunny"></option>
-                <option value="overcast"></option>
-                <option value="rain"></option>
-                <option value="storm"></option>
-                <option value="snow"></option>
-              </datalist>
-            </div>
-          </div>
-          <div>
             <label class="lbl">场景描述（环境/氛围/限制）</label>
             <textarea id="stSceneDesc" rows="3"></textarea>
           </div>
-          <div class="grid2">
-            <div>
-              <label class="lbl">关键细节</label>
-              <div id="stDetails" class="list-edit"></div>
-              <button id="btnAddDetail" class="sm">+ 添加细节</button>
-            </div>
-            <div>
-              <label class="lbl">作战目标</label>
-              <div id="stObjectives" class="list-edit"></div>
-              <button id="btnAddObjective" class="sm">+ 添加目标</button>
+
+          <div class="section">
+            <h4 class="h">细节与目标</h4>
+            <div class="grid2">
+              <div>
+                <label class="lbl">关键细节</label>
+                <div id="stDetails" class="list-edit"></div>
+                <button id="btnAddDetail" class="sm">+ 添加细节</button>
+              </div>
+              <div>
+                <label class="lbl">作战目标</label>
+                <div id="stObjectives" class="list-edit"></div>
+                <button id="btnAddObjective" class="sm">+ 添加目标</button>
+              </div>
             </div>
           </div>
-          <div>
-              <label class="lbl">初始布置</label>
-            <table class="tbl" id="stPositions">
-              <thead><tr><th>名称</th><th>X</th><th>Y</th><th></th></tr></thead>
-              <tbody></tbody>
-            </table>
-            <div>
+
+          <div class="section">
+            <h4 class="h">初始布置</h4>
+            <div class="tbl-wrap">
+              <table class="tbl" id="stPositions">
+                <thead><tr><th>名称</th><th>X</th><th>Y</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="toolbar-row">
               <select id="stPosNameSel"></select>
               <input id="stPosX" type="number" placeholder="X" />
               <input id="stPosY" type="number" placeholder="Y" />
               <button id="btnAddPos" class="sm">+ 添加坐标</button>
+            </div>
+          </div>
 
-            <hr />
+          <div class="section">
             <h4 class="h">结局（endings）</h4>
-            <div class="tbl">
-              <table>
+            <div class="tbl-wrap">
+              <table class="tbl">
                 <thead>
                   <tr>
                     <th style="width:14ch">ID</th>
@@ -152,21 +163,24 @@
                 </thead>
                 <tbody id="stEndingsBody"></tbody>
               </table>
-              <div class="toolbar-row">
-                <button id="btnAddEnding" class="sm">新增结局</button>
-              </div>
-              <div class="dim" style="margin-top:6px">提示：条件支持 any/all/not 与叶子条件（objectives/time/actors_alive/dead/participants_alive_*/hostiles_present/marks_contains/tension_*/location_is）。暂以 JSON 填写。</div>
-            
+            </div>
+            <div class="toolbar-row">
+              <button id="btnAddEnding" class="sm">新增结局</button>
+            </div>
+            <div class="dim" style="margin-top:6px">提示：条件支持 any/all/not 与叶子条件（objectives/time/actors_alive/dead/participants_alive_*/hostiles_present/marks_contains/tension_*/location_is）。暂以 JSON 填写。</div>
+          </div>
 
-            <hr />
+          <div class="section">
             <h4 class="h">多场景与入口</h4>
             <div class="grid2">
               <div>
                 <label class="lbl">场景（scenes）</label>
-                <table class="tbl" id="stScenesTable">
-                  <thead><tr><th>场景ID</th><th>名称</th><th>细节数</th><th></th></tr></thead>
-                  <tbody></tbody>
-                </table>
+                <div class="tbl-wrap">
+                  <table class="tbl" id="stScenesTable">
+                    <thead><tr><th>场景ID</th><th>名称</th><th>细节数</th><th></th></tr></thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
                 <div class="toolbar-row">
                   <button id="btnAddScene" class="sm">+ 新增场景</button>
                 </div>
@@ -188,23 +202,30 @@
               </div>
               <div>
                 <label class="lbl">入口（entrances）</label>
-                <table class="tbl" id="stEntrTable">
-                  <thead><tr><th>ID</th><th>标签</th><th>from</th><th>to</th><th>atX</th><th>atY</th><th>spawnX</th><th>spawnY</th><th>描述</th><th></th></tr></thead>
-                  <tbody></tbody>
-                </table>
+                <div class="tbl-wrap">
+                  <table class="tbl" id="stEntrTable">
+                    <thead><tr><th>ID</th><th>标签</th><th>from</th><th>to</th><th>atX</th><th>atY</th><th>spawnX</th><th>spawnY</th><th>描述</th><th></th></tr></thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
                 <div class="toolbar-row">
                   <button id="btnAddEntrance" class="sm">+ 新增入口</button>
                 </div>
               </div>
             </div>
+          </div>
 
+          <div class="section">
+            <h4 class="h">初始场景与分场坐标</h4>
             <div class="grid2">
               <div>
                 <label class="lbl">初始场景（initial_scenes）</label>
-                <table class="tbl" id="stInitScenesTable">
-                  <thead><tr><th>角色</th><th>场景ID</th><th></th></tr></thead>
-                  <tbody></tbody>
-                </table>
+                <div class="tbl-wrap">
+                  <table class="tbl" id="stInitScenesTable">
+                    <thead><tr><th>角色</th><th>场景ID</th><th></th></tr></thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
                 <div class="toolbar-row">
                   <select id="stInitSceneNameSel"></select>
                   <input id="stInitSceneId" type="text" placeholder="scene_id" />
@@ -216,10 +237,12 @@
                 <div class="toolbar-row">
                   <select id="stScenePosSel"></select>
                 </div>
-                <table class="tbl" id="stScenePosTable">
-                  <thead><tr><th>角色</th><th>X</th><th>Y</th><th></th></tr></thead>
-                  <tbody></tbody>
-                </table>
+                <div class="tbl-wrap">
+                  <table class="tbl" id="stScenePosTable">
+                    <thead><tr><th>角色</th><th>X</th><th>Y</th><th></th></tr></thead>
+                    <tbody></tbody>
+                  </table>
+                </div>
                 <div class="toolbar-row">
                   <select id="stScenePosNameSel"></select>
                   <input id="stScenePosX" type="number" placeholder="X" />
@@ -228,13 +251,8 @@
                 </div>
               </div>
             </div>
-</div>
-            </div>
           </div>
-        </div>
-
-        <!-- Weapons Tab -->
-        <div class="tabpane hidden" data-pane="weapons">
+        </div><div class="tabpane hidden" data-pane="weapons">
           <table class="tbl" id="wpTable">
             <thead>
               <tr>

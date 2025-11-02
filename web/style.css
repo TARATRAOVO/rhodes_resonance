@@ -132,6 +132,9 @@ input[type="text"], input[type="number"], textarea, select {
 }
 input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,0,0,.12); }
 
+/* Textareas: disable manual resize; keep consistent width */
+textarea { resize: none; width: 100%; }
+
 /* Global selects: unified look across the app */
 select {
   appearance: none;
