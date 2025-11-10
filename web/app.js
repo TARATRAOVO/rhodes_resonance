@@ -23,6 +23,7 @@
   const btnCfgClose = drawer ? drawer.querySelector('#btnCfgClose') : null;
   const btnCfgSave = drawer ? drawer.querySelector('#btnCfgSave') : null;
   const btnCfgSaveRestart = drawer ? drawer.querySelector('#btnCfgSaveRestart') : null;
+  const btnCfgExport = drawer ? drawer.querySelector('#btnCfgExport') : null;
   const btnCfgReset = drawer ? drawer.querySelector('#btnCfgReset') : null;
   // Story controls
   const stSceneName = drawer ? drawer.querySelector('#stSceneName') : null;
@@ -94,18 +95,24 @@
   const chAppearance = drawer ? drawer.querySelector('#chAppearance') : null;
   const chQuotes = drawer ? drawer.querySelector('#chQuotes') : null;
   const btnAddQuote = drawer ? drawer.querySelector('#btnAddQuote') : null;
-  const chAC = drawer ? drawer.querySelector('#chAC') : null;
-  const chMaxHP = drawer ? drawer.querySelector('#chMaxHP') : null;
-  const chMove = drawer ? drawer.querySelector('#chMove') : null;
-  const chSTR = drawer ? drawer.querySelector('#chSTR') : null;
-  const chDEX = drawer ? drawer.querySelector('#chDEX') : null;
-  const chCON = drawer ? drawer.querySelector('#chCON') : null;
-  const chINT = drawer ? drawer.querySelector('#chINT') : null;
-  const chSkills = drawer ? drawer.querySelector('#chSkills') : null;
-  const chSaves = drawer ? drawer.querySelector('#chSaves') : null;
-  // Skill/save proficiency UI removed; selectors retained for backward-compat if present
+  // CoC selectors
+  const cocSTR = drawer ? drawer.querySelector('#cocSTR') : null;
+  const cocDEX = drawer ? drawer.querySelector('#cocDEX') : null;
+  const cocCON = drawer ? drawer.querySelector('#cocCON') : null;
+  const cocINT = drawer ? drawer.querySelector('#cocINT') : null;
+  const cocPOW = drawer ? drawer.querySelector('#cocPOW') : null;
+  const cocAPP = drawer ? drawer.querySelector('#cocAPP') : null;
+  const cocEDU = drawer ? drawer.querySelector('#cocEDU') : null;
+  const cocSIZ = drawer ? drawer.querySelector('#cocSIZ') : null;
+  const cocLUCK = drawer ? drawer.querySelector('#cocLUCK') : null;
+  const cocDerived = drawer ? drawer.querySelector('#cocDerived') : null;
+  const chSkillsTable = drawer ? drawer.querySelector('#chSkillsTable') : null;
   const btnAddSkill = drawer ? drawer.querySelector('#btnAddSkill') : null;
-  const btnAddSave = drawer ? drawer.querySelector('#btnAddSave') : null;
+  const terraInfectStage = drawer ? drawer.querySelector('#terraInfectStage') : null;
+  const terraInfectStress = drawer ? drawer.querySelector('#terraInfectStress') : null;
+  const terraCrystal = drawer ? drawer.querySelector('#terraCrystal') : null;
+  const terraArmor = drawer ? drawer.querySelector('#terraArmor') : null;
+  const terraBarrier = drawer ? drawer.querySelector('#terraBarrier') : null;
   const chInvTable = drawer ? drawer.querySelector('#chInvTable') : null;
   const chInvIdSel = drawer ? drawer.querySelector('#chInvIdSel') : null;
   const chInvCount = drawer ? drawer.querySelector('#chInvCount') : null;
@@ -607,7 +614,7 @@
   const original = { story: null, weapons: null, characters: null };
   let chActiveName = '';
   let chRelations = {};
-  const dirty = { story: false, weapons: false, characters: false };
+  const dirty = { story: false, weapons: false, arts: false, characters: false };
   // Story container state for multi-story in single file
   let storyContainer = null;      // { stories: {id: story} }
   let storyContainerRaw = null;   // raw object from server to preserve unknown root keys
@@ -1202,7 +1209,7 @@
     if (!cfg.characters[name]) {
       cfg.characters[name] = {
         type: 'npc', persona: '', appearance: '', quotes: [],
-        dnd: { ac:10, max_hp:8, abilities:{STR:10,DEX:10,CON:10,INT:10}, move_speed:6 },
+        coc: { characteristics: { STR:50, DEX:50, CON:50, INT:50, POW:50, APP:50, EDU:60, SIZ:50, LUCK:50 }, skills: {}, terra: { infection:{ stage:0, stress:0, crystal_density:0 }, protection:{ physical_armor:0, arts_barrier:0 } } },
         inventory: {}
       };
     }
@@ -1212,7 +1219,11 @@
   function fillCharForm(name) {
     const entry = ensureEntry(name);
     if (chName) chName.value = name;
-    if (chType) { chType.value = (entry.type||'npc'); }
+    if (chType) {
+      // Update native select value and notify custom SelectUX to sync its trigger label
+      chType.value = (entry.type||'npc');
+      try { chType.dispatchEvent(new Event('change', { bubbles: true })); } catch (e) { /* no-op */ }
+    }
     if (chPersona) chPersona.value = entry.persona || '';
     if (chAppearance) chAppearance.value = entry.appearance || '';
     // quotes
@@ -1222,16 +1233,76 @@
       entry.quotes = arr;
       arr.forEach((q, idx) => addListRow(chQuotes, q, v => { entry.quotes[idx] = v; markDirty('characters'); }, () => { entry.quotes.splice(idx,1); fillCharForm(name); markDirty('characters'); }));
     }
-    const dnd = entry.dnd = Object.assign({ ac:10, max_hp:8, abilities:{}, move_speed:6 }, entry.dnd || {});
-    const ab = dnd.abilities = Object.assign({STR:10,DEX:10,CON:10,INT:10}, dnd.abilities || {});
-    if (chAC) chAC.value = dnd.ac != null ? dnd.ac : 10;
-    if (chMaxHP) chMaxHP.value = dnd.max_hp != null ? dnd.max_hp : 8;
-    if (chMove) chMove.value = dnd.move_speed != null ? dnd.move_speed : (dnd.move_speed_steps != null ? dnd.move_speed_steps : 6);
-    if (chSTR) chSTR.value = ab.STR != null ? ab.STR : 10;
-    if (chDEX) chDEX.value = ab.DEX != null ? ab.DEX : 10;
-    if (chCON) chCON.value = ab.CON != null ? ab.CON : 10;
-    if (chINT) chINT.value = ab.INT != null ? ab.INT : 10;
-    // skills & saves removed: no-op UI
+    // CoC block
+    const coc = entry.coc = Object.assign({ characteristics:{}, skills:{}, terra:{} }, entry.coc || {});
+    const ch = coc.characteristics = Object.assign({ STR:50, DEX:50, CON:50, INT:50, POW:50, APP:50, EDU:60, SIZ:50, LUCK:50 }, coc.characteristics || {});
+    if (cocSTR) cocSTR.value = ch.STR != null ? ch.STR : 50;
+    if (cocDEX) cocDEX.value = ch.DEX != null ? ch.DEX : 50;
+    if (cocCON) cocCON.value = ch.CON != null ? ch.CON : 50;
+    if (cocINT) cocINT.value = ch.INT != null ? ch.INT : 50;
+    if (cocPOW) cocPOW.value = ch.POW != null ? ch.POW : 50;
+    if (cocAPP) cocAPP.value = ch.APP != null ? ch.APP : 50;
+    if (cocEDU) cocEDU.value = ch.EDU != null ? ch.EDU : 60;
+    if (cocSIZ) cocSIZ.value = ch.SIZ != null ? ch.SIZ : 50;
+    if (cocLUCK) cocLUCK.value = ch.LUCK != null ? ch.LUCK : 50;
+    const recomputeDerived = () => {
+      const CON = parseInt(cocCON ? cocCON.value||'0' : '0', 10) || 0;
+      const SIZ = parseInt(cocSIZ ? cocSIZ.value||'0' : '0', 10) || 0;
+      const POW = parseInt(cocPOW ? cocPOW.value||'0' : '0', 10) || 0;
+      const hp = Math.max(1, Math.floor((CON + SIZ) / 10));
+      const mp = Math.max(0, Math.floor(POW / 5));
+      if (cocDerived) cocDerived.textContent = `HP ≈ ${hp}，MP ≈ ${mp}`;
+    };
+    recomputeDerived();
+    [cocSTR,cocDEX,cocCON,cocINT,cocPOW,cocAPP,cocEDU,cocSIZ,cocLUCK].forEach(el=>{ if (el) el.oninput = ()=>{ const k = el.id.replace('coc',''); coc.characteristics[k] = parseInt(el.value||'0',10)||0; recomputeDerived(); markDirty('characters'); }; });
+    // Skills table
+    if (chSkillsTable) {
+      const tbody = chSkillsTable.querySelector('tbody');
+      const skillListAll = ['Arts_Control','Arts_Offense','Perception','Dodge','FirstAid','Firearms_Handgun','Firearms_Rifle_Crossbow','Fighting_Blade','Fighting_Blunt','Fighting_DualBlade','Fighting_Polearm','Throwables_Explosives','Heavy_Weapons'];
+      const fill = () => {
+        tbody.innerHTML = '';
+        const skills = coc.skills = Object.assign({}, coc.skills || {});
+        Object.entries(skills).forEach(([sname, sval]) => {
+          const tr = document.createElement('tr');
+          const tdName = document.createElement('td');
+          const sel = document.createElement('select');
+          skillListAll.forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; sel.appendChild(o); });
+          sel.value = String(sname);
+          sel.onchange = ()=>{ const v = skills[sname]; delete skills[sname]; skills[sel.value] = v; fill(); markDirty('characters'); };
+          tdName.appendChild(sel);
+          const tdVal = document.createElement('td');
+          const inp = document.createElement('input'); inp.type='number'; inp.value = String(sval||0); inp.oninput=()=>{ skills[sel.value] = parseInt(inp.value||'0',10)||0; markDirty('characters'); };
+          tdVal.appendChild(inp);
+          const tdOps = document.createElement('td'); const btn=document.createElement('button'); btn.className='sm'; btn.textContent='删除'; btn.onclick=()=>{ delete skills[sel.value]; fill(); markDirty('characters'); }; tdOps.appendChild(btn);
+          tr.appendChild(tdName); tr.appendChild(tdVal); tr.appendChild(tdOps);
+          tbody.appendChild(tr);
+        });
+      };
+      fill();
+      if (btnAddSkill) btnAddSkill.onclick = () => {
+        const skills = coc.skills = Object.assign({}, coc.skills || {});
+        const all = ['Arts_Control','Arts_Offense','Perception','Dodge','FirstAid','Firearms_Handgun','Firearms_Rifle_Crossbow','Fighting_Blade','Fighting_Blunt','Fighting_DualBlade','Fighting_Polearm','Throwables_Explosives','Heavy_Weapons'];
+        const exist = new Set(Object.keys(skills));
+        const candidate = all.find(s=>!exist.has(s)) || 'Perception';
+        skills[candidate] = 50;
+        fill(); markDirty('characters');
+      };
+    }
+    // Terra
+    const terra = coc.terra = Object.assign({ infection:{}, protection:{} }, coc.terra || {});
+    const inf = terra.infection = Object.assign({ stage:0, stress:0, crystal_density:0 }, terra.infection || {});
+    const prot = terra.protection = Object.assign({ physical_armor:0, arts_barrier:0 }, terra.protection || {});
+    if (terraInfectStage) terraInfectStage.value = inf.stage != null ? inf.stage : 0;
+    if (terraInfectStress) terraInfectStress.value = inf.stress != null ? inf.stress : 0;
+    if (terraCrystal) terraCrystal.value = inf.crystal_density != null ? inf.crystal_density : 0;
+    if (terraArmor) terraArmor.value = prot.physical_armor != null ? prot.physical_armor : 0;
+    if (terraBarrier) terraBarrier.value = prot.arts_barrier != null ? prot.arts_barrier : 0;
+    const bindCoCNum = (el, set) => { if (!el) return; el.addEventListener('input', ()=>{ if (!chActiveName) return; set(); markDirty('characters'); }); };
+    bindCoCNum(terraInfectStage, ()=>{ ensureEntry(chActiveName).coc.terra.infection.stage = parseInt(terraInfectStage.value||'0',10)||0; });
+    bindCoCNum(terraInfectStress, ()=>{ ensureEntry(chActiveName).coc.terra.infection.stress = parseInt(terraInfectStress.value||'0',10)||0; });
+    bindCoCNum(terraCrystal, ()=>{ ensureEntry(chActiveName).coc.terra.infection.crystal_density = parseInt(terraCrystal.value||'0',10)||0; });
+    bindCoCNum(terraArmor, ()=>{ ensureEntry(chActiveName).coc.terra.protection.physical_armor = parseInt(terraArmor.value||'0',10)||0; });
+    bindCoCNum(terraBarrier, ()=>{ ensureEntry(chActiveName).coc.terra.protection.arts_barrier = parseInt(terraBarrier.value||'0',10)||0; });
     // inventory
     if (chInvTable) {
       const tbody = chInvTable.querySelector('tbody');
@@ -1374,12 +1445,27 @@
       tbody.innerHTML = '';
       const map = cfg.story.entrances = Object.assign({}, cfg.story.entrances || {});
       const mkInput=(type,val,on)=>{ const i=document.createElement('input'); i.type=type; i.value=(val!=null? String(val):''); i.addEventListener('input',()=>on(i.value)); return i; };
+      const sceneIds = Object.keys(cfg.story.scenes || {});
       Object.entries(map).forEach(([eid, e]) => {
         const tr = document.createElement('tr');
         const tdId=document.createElement('td'); tdId.textContent=eid; tr.appendChild(tdId);
         const tdLabel=document.createElement('td'); const inLbl=mkInput('text', (e||{}).label||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).label=v; markDirty('story'); }); tdLabel.appendChild(inLbl); tr.appendChild(tdLabel);
-        const tdFrom=document.createElement('td'); const inFrom=mkInput('text', (e||{}).from_scene||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).from_scene=v; markDirty('story'); }); tdFrom.appendChild(inFrom); tr.appendChild(tdFrom);
-        const tdTo=document.createElement('td'); const inTo=mkInput('text', (e||{}).to_scene||'', v=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).to_scene=v; markDirty('story'); }); tdTo.appendChild(inTo); tr.appendChild(tdTo);
+        // from_scene select
+        const tdFrom=document.createElement('td');
+        const selFrom=document.createElement('select');
+        const phF=document.createElement('option'); phF.value=''; phF.textContent='选择场景…'; selFrom.appendChild(phF);
+        sceneIds.forEach(id=>{ const o=document.createElement('option'); o.value=id; o.textContent=id; selFrom.appendChild(o); });
+        selFrom.value=String((e||{}).from_scene||'');
+        selFrom.addEventListener('change', ()=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).from_scene=selFrom.value; markDirty('story'); });
+        tdFrom.appendChild(selFrom); tr.appendChild(tdFrom);
+        // to_scene select
+        const tdTo=document.createElement('td');
+        const selTo=document.createElement('select');
+        const phT=document.createElement('option'); phT.value=''; phT.textContent='选择场景…'; selTo.appendChild(phT);
+        sceneIds.forEach(id=>{ const o=document.createElement('option'); o.value=id; o.textContent=id; selTo.appendChild(o); });
+        selTo.value=String((e||{}).to_scene||'');
+        selTo.addEventListener('change', ()=>{ (cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})).to_scene=selTo.value; markDirty('story'); });
+        tdTo.appendChild(selTo); tr.appendChild(tdTo);
         const at = Array.isArray((e||{}).at) ? (e.at||[]) : [];
         const sp = Array.isArray((e||{}).spawn) ? (e.spawn||[]) : [];
         const tdAx=document.createElement('td'); const inAx=mkInput('number', (Array.isArray(at)&&at.length>0? String(at[0]) : ''), v=>{ const A=(cfg.story.entrances[eid]||(cfg.story.entrances[eid]={})); const arr=Array.isArray(A.at)?A.at:[0,0]; arr[0]=parseInt(v||'0',10)||0; A.at=arr; markDirty('story'); }); tdAx.appendChild(inAx); tr.appendChild(tdAx);
@@ -1530,7 +1616,10 @@
     dirty.weapons = false;
     const tbody = wpTable.querySelector('tbody');
     tbody.innerHTML = '';
-    const abilities = ['STR','DEX','CON','INT'];
+    const rrOpt = (window.RR && window.RR.options) ? window.RR.options : {};
+    const weaponSkillList = Array.isArray(rrOpt.weapon_hit_skills) ? rrOpt.weapon_hit_skills : ['Fighting_Blade','Fighting_Blunt','Fighting_DualBlade','Fighting_Polearm','Firearms_Handgun','Firearms_Rifle_Crossbow','Throwables_Explosives'];
+    const defenseSkillList = Array.isArray(rrOpt.defense_skills) ? rrOpt.defense_skills : ['Dodge'];
+    const dmgTypes = Array.isArray(rrOpt.weapon_damage_types) ? rrOpt.weapon_damage_types : ['physical','arts'];
     const ids = Object.keys(cfg.weapons || {});
     ids.forEach((id) => {
       const item = cfg.weapons[id] || {};
@@ -1575,22 +1664,32 @@
       // reach
       const tdReach = document.createElement('td');
       const inReach = document.createElement('input'); inReach.type='number'; inReach.value = (item.reach_steps!=null? item.reach_steps:1); inReach.addEventListener('input',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).reach_steps = parseInt(inReach.value||'1',10); markDirty('weapons'); }); tdReach.appendChild(inReach);
-      // ability
-      const tdAb = document.createElement('td');
-      const selAb = document.createElement('select'); abilities.forEach(ab=>{ const opt=document.createElement('option'); opt.value=ab; opt.textContent=ab; selAb.appendChild(opt); }); selAb.value=(String(item.ability||'STR').toUpperCase()); selAb.addEventListener('change',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).ability = selAb.value; markDirty('weapons'); }); tdAb.appendChild(selAb);
-      // damage expr
+      // hit skill
+      const tdHit = document.createElement('td');
+      const selHit = document.createElement('select'); weaponSkillList.forEach(s=>{ const opt=document.createElement('option'); opt.value=s; opt.textContent=s; selHit.appendChild(opt); }); selHit.value=String(item.skill||'Fighting_Blade'); selHit.addEventListener('change',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).skill = selHit.value; markDirty('weapons'); }); tdHit.appendChild(selHit);
+      // defense skill
+      const tdDef = document.createElement('td');
+      const selDef = document.createElement('select'); defenseSkillList.forEach(s=>{ const opt=document.createElement('option'); opt.value=s; opt.textContent=s; selDef.appendChild(opt); }); selDef.value=String(item.defense_skill||'Dodge'); selDef.addEventListener('change',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).defense_skill = selDef.value; markDirty('weapons'); }); tdDef.appendChild(selDef);
+      // damage formula (NdM[+/-K])
       const tdDmg = document.createElement('td');
       const inDmg = document.createElement('input');
       inDmg.type='text';
       inDmg.placeholder='例如 1d6（不含属性加成）';
-      inDmg.value=(item.damage_expr||'');
-      inDmg.addEventListener('input',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).damage_expr=inDmg.value; markDirty('weapons'); });
+      // backend uses `damage` field; prefer it if present
+      inDmg.value = (item.damage || '');
+      const dmgValid = (s)=>{ return /^\s*\d*d\d+(?:[+-]\d+)?\s*$/i.test(String(s||'')); };
+      const reflectDmgValid = ()=>{ try { inDmg.style.borderColor = inDmg.value && !dmgValid(inDmg.value) ? '#e11d48' : ''; } catch(e){} };
+      inDmg.addEventListener('input',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).damage = inDmg.value; reflectDmgValid(); markDirty('weapons'); });
+      reflectDmgValid();
       tdDmg.appendChild(inDmg);
+      // damage type
+      const tdDmgType = document.createElement('td');
+      const selType = document.createElement('select'); dmgTypes.forEach(t=>{ const opt=document.createElement('option'); opt.value=t; opt.textContent=(t==='arts'?'术伤':'物理'); selType.appendChild(opt); }); selType.value=String(item.damage_type||'physical'); selType.addEventListener('change',()=>{ (cfg.weapons[id]||(cfg.weapons[id]={})).damage_type = selType.value; markDirty('weapons'); }); tdDmgType.appendChild(selType);
       // ops
       const tdOps = document.createElement('td');
       const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.weapons[id]; renderWeaponsForm(cfg.weapons); markDirty('weapons'); };
       tdOps.appendChild(btnDel);
-      tr.appendChild(tdId); tr.appendChild(tdLabel); tr.appendChild(tdReach); tr.appendChild(tdAb); tr.appendChild(tdDmg); tr.appendChild(tdOps);
+      tr.appendChild(tdId); tr.appendChild(tdLabel); tr.appendChild(tdReach); tr.appendChild(tdHit); tr.appendChild(tdDef); tr.appendChild(tdDmg); tr.appendChild(tdDmgType); tr.appendChild(tdOps);
       tbody.appendChild(tr);
     });
     // refresh characters inventory add-select (if visible)
@@ -1613,13 +1712,15 @@
 
   async function loadAllConfigs() {
     // Load latest configs and state snapshot for helpers
-    const [stRes, wpRes, chRes, stState, artsRes] = await Promise.all([
+    const [stRes, wpRes, chRes, stState, artsRes, optRes] = await Promise.all([
       fetch('/api/config/story').then(r=>r.json()).catch(()=>({data:{}})),
       fetch('/api/config/weapons').then(r=>r.json()).catch(()=>({data:{}})),
       fetch('/api/config/characters').then(r=>r.json()).catch(()=>({data:{}})),
       fetch('/api/state').then(r=>r.json()).catch(()=>({state:null})),
       fetch('/api/config/arts').then(r=>r.json()).catch(()=>({data:{}})),
+      fetch('/api/options').then(r=>r.json()).catch(()=>({})),
     ]);
+    window.RR = window.RR || {}; window.RR.options = optRes && optRes.ok ? optRes : (window.RR.options || {});
     lastState = (stState||{}).state || lastState || {};
     renderCharactersForm((chRes||{}).data||{});
     // Story: support container format
@@ -1678,10 +1779,17 @@
       const base = Object.assign({}, orig[id] || {});
       base.label = (src.label || '').trim();
       base.reach_steps = parseInt(src.reach_steps != null ? src.reach_steps : 1, 10) || 1;
-      base.ability = String(src.ability || 'STR').toUpperCase();
-      base.damage_expr = (src.damage_expr || '').trim();
+      // Persist damage into standard backend field `damage`
+      if (src.damage != null) base.damage = String(src.damage || '').trim();
+      // Skills & damage type from UI (with defaults)
+      base.skill = String(src.skill || base.skill || 'Fighting_Blade');
+      base.defense_skill = String(src.defense_skill || base.defense_skill || 'Dodge');
+      base.damage_type = String(src.damage_type || base.damage_type || 'physical');
       // no proficient flag anymore
       if ('proficient_default' in base) delete base.proficient_default;
+      // drop any accidental UI-only keys to satisfy server validation
+      if ('ability' in base) delete base.ability;
+      if ('damage_expr' in base) delete base.damage_expr;
       out[id] = base;
     }
     return out;
@@ -1690,13 +1798,27 @@
   function charactersCollect() {
     // Merge edited characters with preserved relations
     const out = {};
+    const orig = original.characters || {};
     for (const [name, entry] of Object.entries(cfg.characters || {})) {
-      out[name] = JSON.parse(JSON.stringify(entry || {}));
-      // normalize dnd.move_speed_steps alias to move_speed for file compatibility
-      const d = out[name].dnd || {};
-      if (d.move_speed_steps != null && d.move_speed == null) d.move_speed = d.move_speed_steps;
-      // ensure arrays are arrays
-      if (typeof out[name].quotes === 'string') out[name].quotes = [out[name].quotes];
+      const src = JSON.parse(JSON.stringify(entry || {}));
+      const dst = {};
+      dst.type = src.type || 'npc';
+      dst.persona = src.persona || '';
+      dst.appearance = src.appearance || '';
+      // quotes normalize
+      dst.quotes = Array.isArray(src.quotes) ? src.quotes : (src.quotes ? [String(src.quotes)] : []);
+      // inventory as-is
+      dst.inventory = Object.assign({}, src.inventory || {});
+      // coc: overwrite main blocks, preserve extras
+      const oCoc = (orig[name] && orig[name].coc) ? JSON.parse(JSON.stringify(orig[name].coc)) : {};
+      const nCoc = (src.coc && typeof src.coc==='object') ? JSON.parse(JSON.stringify(src.coc)) : {};
+      const ch = Object.assign({}, (nCoc.characteristics||{}));
+      const skills = Object.assign({}, (nCoc.skills||{}));
+      const terra = Object.assign({}, (nCoc.terra||{}));
+      const extras = {};
+      Object.keys(oCoc||{}).forEach(k => { if (!(k in {characteristics:1, skills:1, terra:1})) extras[k] = oCoc[k]; });
+      dst.coc = Object.assign({}, extras, { characteristics: ch, skills, terra });
+      out[name] = dst;
     }
     out.relations = JSON.parse(JSON.stringify(chRelations || {}));
     return out;
@@ -1763,12 +1885,44 @@
     }
   }
 
+  async function exportAll() {
+    const names = ['story','weapons','arts','characters'];
+    // If any section is dirty, confirm saving all before export
+    const needSave = names.some(n => !!dirty[n]);
+    if (needSave) {
+      const ok = confirm('有未保存的更改，是否先保存全部再导出？');
+      if (!ok) return;
+      const prev = activeTab;
+      try {
+        for (const n of names) {
+          if (dirty[n]) {
+            activeTab = n; // saveActive reads activeTab to decide endpoint
+            await saveActive(false);
+          }
+        }
+      } finally {
+        activeTab = prev;
+      }
+    }
+    // Trigger four downloads from server endpoints (no front-end JSON involved)
+    try {
+      for (const n of names) {
+        const url = withApiBase(`/api/export/${n}`);
+        const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener';
+        document.body.appendChild(a); a.click(); a.remove();
+      }
+    } catch (e) {
+      alert('导出失败: ' + (e.message || e));
+    }
+  }
+
   // Wire events
   if (btnSettings) btnSettings.onclick = async () => { setActiveTab('story'); drawerOpen(); await loadAllConfigs(); };
   if (btnCfgClose) btnCfgClose.onclick = () => drawerClose(false);
   if (btnCfgSave) btnCfgSave.onclick = () => saveActive(false);
   if (btnCfgSaveRestart) btnCfgSaveRestart.onclick = () => saveActive(true);
   if (btnCfgReset) btnCfgReset.onclick = async () => { await loadAllConfigs(); alert('已重置为服务器版本'); };
+  if (btnCfgExport) btnCfgExport.onclick = () => exportAll();
   for (const b of tabBtns) {
     b.onclick = () => setActiveTab(b.getAttribute('data-tab'));
   }
@@ -1782,9 +1936,15 @@
     if (!artsTable) return;
     const tbody = artsTable.querySelector('tbody');
     const abilities = ['STR','DEX','CON','INT','POW'];
-    const skillList = ['Arts_Control','Arts_Offense','Perception','Dodge','FirstAid','Firearms_Handgun','Firearms_Rifle_Crossbow'];
+    const rrOptA = (window.RR && window.RR.options) ? window.RR.options : {};
+    const skillList = Array.isArray(rrOptA.art_cast_skills) ? rrOptA.art_cast_skills : ['Arts_Control','Arts_Offense','Perception','Dodge','FirstAid','Firearms_Handgun','Firearms_Rifle_Crossbow'];
     const fill = () => {
       tbody.innerHTML = '';
+      const rrOpt = (window.RR && window.RR.options) ? window.RR.options : {};
+      const ctrlDefault = ['silenced','rooted','immobilized','restrained','stunned','paralyzed','sleep','frozen'];
+      const ctrlOptions = [''].concat(Array.isArray(rrOpt.control_effects)? rrOpt.control_effects : ctrlDefault);
+      const tagOptions = Array.isArray(rrOpt.art_tags) ? rrOpt.art_tags : ['no-guard-intercept','line-of-sight'];
+      const dmgTypes = Array.isArray(rrOpt.art_damage_types) ? rrOpt.art_damage_types : ['arts','physical'];
       Object.entries(cfg.arts || {}).forEach(([id, a]) => {
         const tr = document.createElement('tr');
         const td = (el) => { const td=document.createElement('td'); td.appendChild(el); return td; };
@@ -1795,27 +1955,50 @@
         // cast_skill
         const selCast = document.createElement('select'); skillList.forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; selCast.appendChild(o); }); selCast.value=String(a.cast_skill||'Arts_Control'); selCast.onchange=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).cast_skill=selCast.value; markDirty('arts'); };
         // resist
-        const selRes = document.createElement('select'); ['Arts_Resist','Dodge'].forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; selRes.appendChild(o); }); selRes.value=String(a.resist||'Arts_Resist'); selRes.onchange=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).resist=selRes.value; markDirty('arts'); };
+        const selRes = document.createElement('select'); (Array.isArray(rrOptA.art_resist_skills)? rrOptA.art_resist_skills : ['Arts_Resist','Dodge']).forEach(s=>{ const o=document.createElement('option'); o.value=s; o.textContent=s; selRes.appendChild(o); }); selRes.value=String(a.resist||'Arts_Resist'); selRes.onchange=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).resist=selRes.value; markDirty('arts'); };
         // range_steps
-        const inRange = document.createElement('input'); inRange.type='number'; inRange.value=(a.range_steps!=null? a.range_steps:6); inRange.oninput=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).range_steps=parseInt(inRange.value||'6',10)||6; markDirty('arts'); };
+        const inRange = document.createElement('input'); inRange.type='number'; inRange.value=(a.range_steps!=null? a.range_steps:6); inRange.oninput=()=>{ const v=parseInt(inRange.value||'6',10)||6; (cfg.arts[id]||(cfg.arts[id]={})).range_steps=v; inRange.style.borderColor = (v<=0 ? '#e11d48' : ''); markDirty('arts'); };
+        // damage_type select
+        const selDType = document.createElement('select'); dmgTypes.forEach(t=>{ const o=document.createElement('option'); o.value=t; o.textContent=(t==='arts'?'术伤':'物理'); selDType.appendChild(o); }); selDType.value=String(a.damage_type||'arts'); selDType.onchange=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).damage_type=selDType.value; markDirty('arts'); };
         // damage
         const inDmg = document.createElement('input'); inDmg.type='text'; inDmg.value=(a.damage||''); inDmg.placeholder='如 1d6+1d4'; inDmg.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); if (inDmg.value.trim()) m.damage=inDmg.value.trim(); else delete m.damage; markDirty('arts'); };
-        // control.effect
-        const inCtl = document.createElement('input'); inCtl.type='text'; inCtl.value=((a.control||{}).effect||''); inCtl.placeholder='silenced/restrained/sleep/...'; inCtl.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.control=m.control||{}; m.control.effect=inCtl.value.trim(); if (!m.control.effect) delete m.control.effect; markDirty('arts'); };
+        // control.effect (select)
+        const selCtl = document.createElement('select');
+        ctrlOptions.forEach(v => { const o=document.createElement('option'); o.value=v; o.textContent=(v? v : '（无）'); selCtl.appendChild(o); });
+        selCtl.value=String(((a.control||{}).effect||''));
+        selCtl.onchange=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.control=m.control||{}; const v=selCtl.value||''; if (v) { m.control.effect=v; } else { delete m.control.effect; if (m.control && !m.control.duration) delete m.control; } markDirty('arts'); };
         // control.duration
-        const inDur = document.createElement('input'); inDur.type='text'; inDur.value=((a.control||{}).duration||''); inDur.placeholder='1 或 表达式'; inDur.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.control=m.control||{}; m.control.duration=inDur.value.trim(); if (!m.control.duration) delete m.control.duration; markDirty('arts'); };
+        const inDur = document.createElement('input'); inDur.type='text'; inDur.value=((a.control||{}).duration||''); inDur.placeholder='1 或 表达式'; inDur.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.control=m.control||{}; m.control.duration=inDur.value.trim(); if (!m.control.duration) delete m.control.duration; const ok = /^\s*[0-9+\-*/()\s]*\s*$/.test(inDur.value||''); inDur.style.borderColor = ok ? '' : '#e11d48'; markDirty('arts'); };
         // mp (cost/variable/max)
         const inCost = document.createElement('input'); inCost.type='number'; inCost.value=((a.mp||{}).cost!=null? a.mp.cost:0); inCost.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.mp=m.mp||{}; m.mp.cost=parseInt(inCost.value||'0',10)||0; markDirty('arts'); };
         const inVar = document.createElement('input'); inVar.type='checkbox'; inVar.checked=!!((a.mp||{}).variable); inVar.onchange=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.mp=m.mp||{}; m.mp.variable=!!inVar.checked; markDirty('arts'); };
         const inMax = document.createElement('input'); inMax.type='number'; inMax.value=((a.mp||{}).max!=null? a.mp.max:0); inMax.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); m.mp=m.mp||{}; m.mp.max=parseInt(inMax.value||'0',10)||0; markDirty('arts'); };
         const mpWrap = document.createElement('div'); mpWrap.className='row'; mpWrap.appendChild(inCost); const lbl=document.createElement('label'); lbl.textContent=' 可变'; lbl.style.marginLeft='4px'; const wrapVar=document.createElement('span'); wrapVar.appendChild(inVar); wrapVar.appendChild(lbl); mpWrap.appendChild(wrapVar); mpWrap.appendChild(inMax);
-        // tags (comma separated)
-        const inTags = document.createElement('input'); inTags.type='text'; inTags.value=Array.isArray(a.tags)? a.tags.join(',') : ''; inTags.placeholder='tag1,tag2'; inTags.oninput=()=>{ const m=(cfg.arts[id]||(cfg.arts[id]={})); const v=inTags.value.trim(); m.tags = v? v.split(/\s*,\s*/).filter(Boolean) : []; markDirty('arts'); };
+        // tags (checkboxes for allowed options; preserve unknown tags)
+        const tdTagsWrap = document.createElement('div');
+        const curTags = Array.isArray(a.tags)? a.tags.slice(): [];
+        const unknown = curTags.filter(t => !tagOptions.includes(String(t)));
+        const rebuildTags = () => {
+          const selected = Array.from(tdTagsWrap.querySelectorAll('input[type="checkbox"]')).filter(x => x.checked).map(x => x.value);
+          const m = (cfg.arts[id]||(cfg.arts[id]={}));
+          m.tags = selected.concat(unknown);
+          markDirty('arts');
+        };
+        tagOptions.forEach(t => {
+          const lab = document.createElement('label'); lab.style.marginRight='6px';
+          const cb = document.createElement('input'); cb.type='checkbox'; cb.value=t; cb.checked=curTags.includes(t);
+          cb.addEventListener('change', rebuildTags);
+          lab.appendChild(cb); lab.appendChild(document.createTextNode(' '+t));
+          tdTagsWrap.appendChild(lab);
+        });
+        if (unknown.length) {
+          const span = document.createElement('span'); span.className='dim'; span.textContent = ' 其余: '+unknown.join(','); tdTagsWrap.appendChild(span);
+        }
         // desc
         const inDesc = document.createElement('input'); inDesc.type='text'; inDesc.value=(a.desc||''); inDesc.oninput=()=>{ (cfg.arts[id]||(cfg.arts[id]={})).desc=inDesc.value; markDirty('arts'); };
         // ops
         const btnDel = document.createElement('button'); btnDel.className='sm'; btnDel.textContent='删除'; btnDel.onclick=()=>{ delete cfg.arts[id]; fill(); markDirty('arts'); };
-        tr.appendChild(td(inId)); tr.appendChild(td(inLabel)); tr.appendChild(td(selCast)); tr.appendChild(td(selRes)); tr.appendChild(td(inRange)); tr.appendChild(td(inDmg)); tr.appendChild(td(inCtl)); tr.appendChild(td(inDur)); tr.appendChild(td(mpWrap)); tr.appendChild(td(inTags)); tr.appendChild(td(inDesc)); tr.appendChild(td(btnDel));
+        tr.appendChild(td(inId)); tr.appendChild(td(inLabel)); tr.appendChild(td(selCast)); tr.appendChild(td(selRes)); tr.appendChild(td(inRange)); tr.appendChild(td(selDType)); tr.appendChild(td(inDmg)); tr.appendChild(td(selCtl)); tr.appendChild(td(inDur)); tr.appendChild(td(mpWrap)); tr.appendChild(td(tdTagsWrap)); tr.appendChild(td(inDesc)); tr.appendChild(td(btnDel));
         tbody.appendChild(tr);
       });
     };
@@ -2211,16 +2394,7 @@
   if (chPersona) chPersona.addEventListener('input', ()=>{ if (!chActiveName) return; ensureEntry(chActiveName).persona = chPersona.value; markDirty('characters'); });
   if (chAppearance) chAppearance.addEventListener('input', ()=>{ if (!chActiveName) return; ensureEntry(chActiveName).appearance = chAppearance.value; markDirty('characters'); });
   if (btnAddQuote) btnAddQuote.onclick = ()=>{ if (!chActiveName) return; const e=ensureEntry(chActiveName); if (!Array.isArray(e.quotes)) e.quotes=[]; e.quotes.push(''); fillCharForm(chActiveName); markDirty('characters'); };
-  // dnd numeric & abilities
-  const bindNum = (el, set) => { if (!el) return; el.addEventListener('input', ()=>{ if (!chActiveName) return; set(); markDirty('characters'); }); };
-  bindNum(chAC, ()=>{ ensureEntry(chActiveName).dnd.ac = parseInt(chAC.value||'10',10); });
-  bindNum(chMaxHP, ()=>{ ensureEntry(chActiveName).dnd.max_hp = parseInt(chMaxHP.value||'8',10); });
-  bindNum(chMove, ()=>{ ensureEntry(chActiveName).dnd.move_speed = parseInt(chMove.value||'6',10); });
-  bindNum(chSTR, ()=>{ ensureEntry(chActiveName).dnd.abilities.STR = parseInt(chSTR.value||'10',10); });
-  bindNum(chDEX, ()=>{ ensureEntry(chActiveName).dnd.abilities.DEX = parseInt(chDEX.value||'10',10); });
-  bindNum(chCON, ()=>{ ensureEntry(chActiveName).dnd.abilities.CON = parseInt(chCON.value||'10',10); });
-  bindNum(chINT, ()=>{ ensureEntry(chActiveName).dnd.abilities.INT = parseInt(chINT.value||'10',10); });
-  // Skill/save proficiency editing removed
+  // Skill/save proficiency UI 已移除；CoC 属性在 fillCharForm 中绑定
   if (btnAddInv) btnAddInv.onclick = ()=>{
     if (!chActiveName) return;
     const id = chInvIdSel ? String(chInvIdSel.value||'').trim() : '';
@@ -2244,8 +2418,13 @@
     } else {
       if ((cfg.weapons||{})[id]) { alert('已存在同名武器 ID'); return; }
     }
-    // 新增武器不再自动填充伤害表达式；留空以提示用户必填
-    (cfg.weapons||(cfg.weapons={}))[id] = { label:'', reach_steps:1, ability:'STR', damage_expr:'' };
+    // 新增武器：填入后端必需的字段默认值，伤害留空提示用户填写
+    (cfg.weapons||(cfg.weapons={}))[id] = {
+      label:'', reach_steps:1,
+      // Backend-required keys with sensible defaults
+      skill:'Fighting_Blade', defense_skill:'Dodge', damage_type:'physical',
+      damage:''
+    };
     renderWeaponsForm(cfg.weapons); markDirty('weapons');
   };
 })();

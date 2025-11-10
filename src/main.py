@@ -2813,7 +2813,7 @@ from collections import deque
 # Optional server deps (only required in server mode)
 try:  # lazy import to keep --once usable without extra deps
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
     from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
@@ -3483,6 +3483,36 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
             code = 500
         return JSONResponse({"ok": False, "message": msg}, status_code=code)
 
+    @app.get("/api/export/{name}")
+    async def api_export_config(name: str):  # type: ignore[no-redef]
+        """Download a server-side JSON config as an attachment.
+
+        Only supports whitelisted config names; always exports the on-disk version
+        (never the client's in-memory edits). The JSON payload is pretty-printed
+        with 2-space indentation and a trailing newline.
+        """
+        if not cfg_service:
+            return JSONResponse({"ok": False, "message": "config service unavailable"}, status_code=500)
+        allowed = {"story", "weapons", "characters", "arts"}
+        if str(name) not in allowed:
+            return JSONResponse({"ok": False, "message": f"unsupported config: {name}"}, status_code=404)
+        try:
+            data = cfg_service.read(str(name))
+        except Exception as exc:
+            return JSONResponse({"ok": False, "message": f"read failed: {exc}"}, status_code=500)
+        try:
+            txt = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+        except Exception as exc:
+            return JSONResponse({"ok": False, "message": f"encode failed: {exc}"}, status_code=500)
+        # Timestamped filename, local timezone
+        try:
+            ts = datetime.now(timezone.utc).astimezone().strftime("%Y%m%d-%H%M%S")
+        except Exception:
+            ts = "now"
+        filename = f"{name}_{ts}.json"
+        headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+        return Response(content=txt, media_type="application/json; charset=utf-8", headers=headers)
+
     @app.get("/api/stories")
     async def api_stories(request: Request):  # type: ignore[no-redef]
         ids = (cfg_service.list_story_ids() if cfg_service else [])
@@ -3493,6 +3523,42 @@ def _make_app(web_dir: Optional[Path], *, allow_cors_from: Optional[list[str]] =
             else (ids[0] if ids else "")
         )
         return {"ok": True, "ids": ids, "selected": sel}
+
+    @app.get("/api/options")
+    async def api_options():  # type: ignore[no-redef]
+        """Return option lists for constrained frontend fields.
+
+        - control_effects: supported control status keys from world rules
+        - art_tags: known tag flags for arts
+        - art_damage_types: valid damage types for arts
+        - weapon_damage_types: valid damage types for weapons
+        """
+        try:
+            ctrl = sorted(list(getattr(world_impl, "CONTROL_STATUS_RULES", {}).keys()))
+        except Exception:
+            ctrl = ["silenced","rooted","immobilized","restrained","stunned","paralyzed","sleep","frozen"]
+        art_tags = ["no-guard-intercept", "line-of-sight"]
+        dmg_types = ["arts", "physical"]
+        # Provide skill name suggestions (curated; engine accepts strings)
+        weapon_hit_skills = [
+            "Fighting_Blade","Fighting_Blunt","Fighting_DualBlade","Fighting_Polearm",
+            "Firearms_Handgun","Firearms_Rifle_Crossbow","Throwables_Explosives","Heavy_Weapons",
+            "Arts_Offense","Arts_Control","Perception","FirstAid","Dodge"
+        ]
+        defense_skills = ["Dodge"]
+        art_cast_skills = ["Arts_Control","Arts_Offense","Perception","FirstAid","Dodge"]
+        art_resist_skills = ["Arts_Resist","Dodge"]
+        return {
+            "ok": True,
+            "control_effects": ctrl,
+            "art_tags": art_tags,
+            "art_damage_types": dmg_types,
+            "weapon_damage_types": ["physical", "arts"],
+            "weapon_hit_skills": weapon_hit_skills,
+            "defense_skills": defense_skills,
+            "art_cast_skills": art_cast_skills,
+            "art_resist_skills": art_resist_skills,
+        }
 
     @app.post("/api/select_story")
     async def api_select_story(payload: dict, request: Request):  # type: ignore[no-redef]

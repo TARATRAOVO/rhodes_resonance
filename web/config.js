@@ -6,8 +6,23 @@
 // Note: When deployed on Vercel as a purely static site, you typically want this to
 //       point to the separately hosted backend, since Vercel does not run this
 //       project's Python/FastAPI + WebSocket server.
+// Runtime config for the static frontend.
+// Auto-detect local dev vs deployed frontend so both cases "just work":
+// - When running locally (served by FastAPI at http://127.0.0.1:8000 or http://localhost:8000),
+//   talk to the same origin to avoid CORS and ensure you use your local backend.
+// - When opened from a public site (e.g. GitHub Pages), default to the deployed backend origin.
+//   You can still override at runtime with ?backend=https://your-backend.example.com
 window.RR = window.RR || {};
-// For local development, talk to the same origin (the FastAPI server that also serves the static files).
-// When deploying the frontend separately from the backend, set this to your backend's origin,
-// e.g. "https://your-backend.example.com" and ensure the backend enables CORS for the frontend origin.
-window.RR.backendOrigin = "https://inspector-aye-graphs-spend.trycloudflare.com"; // default backend for deployed frontend
+(function () {
+  try {
+    var host = (typeof location !== 'undefined') ? String(location.hostname || '').toLowerCase() : '';
+    var isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(host);
+    // Deployed backend default (used when not on localhost)
+    var REMOTE_DEFAULT = "https://inspector-aye-graphs-spend.trycloudflare.com";
+    // Same-origin for local dev; remote default otherwise
+    window.RR.backendOrigin = isLocal ? "" : REMOTE_DEFAULT;
+  } catch (e) {
+    // Fallback to previous deployed default if detection fails
+    window.RR.backendOrigin = "https://inspector-aye-graphs-spend.trycloudflare.com";
+  }
+})();

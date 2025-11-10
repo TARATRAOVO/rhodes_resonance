@@ -382,7 +382,8 @@
         "time": "08:00",
         "objectives": [
           "选择路径抵达目标区域"
-        ]
+        ],
+        "description": ""
       },
       "endings": [
         {
@@ -497,7 +498,9 @@
             "time_at_least": "08:30"
           }
         }
-      ]
+      ],
+      "initial_positions": {},
+      "events": []
     }
   }
 }

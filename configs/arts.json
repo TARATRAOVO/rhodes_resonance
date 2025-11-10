@@ -29,7 +29,7 @@
     "damage_type": "arts",
     "control": {
       "effect": "restrained",
-      "duration": "1 + INT_10//10"
+      "duration": "1"
     },
     "mp": {
       "cost": 3,
@@ -67,7 +67,7 @@
     "resist": "Arts_Resist",
     "range_steps": 6,
     "damage_type": "arts",
-    "damage": "1d6+1d4",
+    "damage": "1d6",
     "control": {
       "effect": "silenced",
       "duration": "1"
