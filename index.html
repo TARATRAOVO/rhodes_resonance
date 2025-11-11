@@ -10,7 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=91fb49e" />
+    <link rel="stylesheet" href="style.css?v=3f134d5" />
   </head>
   <body>
     <header class="topbar">
@@ -73,6 +73,7 @@
           <button id="btnCfgReset" class="ghost">重置</button>
           <button id="btnCfgSave">保存</button>
           <button id="btnCfgSaveRestart">保存并重启</button>
+          <button id="btnCfgExport" class="ghost">导出全部</button>
           <button id="btnCfgClose" class="ghost">关闭</button>
         </div>
       </div>
@@ -259,8 +260,10 @@
                 <th>ID</th>
                 <th>名称</th>
                 <th>射程(步)</th>
-                <th>相关属性</th>
+                <th>命中技能</th>
+                <th>防御技能</th>
                 <th>伤害公式（不含属性加成）</th>
+                <th>伤害类型</th>
                 <th></th>
               </tr>
             </thead>
@@ -279,6 +282,7 @@
                 <th>施术检定</th>
                 <th>抗性</th>
                 <th>射程(步)</th>
+                <th>伤害类型</th>
                 <th>伤害</th>
                 <th>控制效果</th>
                 <th>持续</th>
@@ -364,24 +368,54 @@
               <div id="chQuotes" class="list-edit"></div>
               <button id="btnAddQuote" class="sm">+ 添加台词</button>
 
-              <label class="lbl">单位属性</label>
+              <label class="lbl">CoC 属性</label>
               <div class="grid2">
-                <div><label class="lbl">AC</label><input id="chAC" type="number" /></div>
+                <div><label class="lbl">STR</label><input id="cocSTR" type="number" /></div>
+                <div><label class="lbl">DEX</label><input id="cocDEX" type="number" /></div>
+                <div><label class="lbl">CON</label><input id="cocCON" type="number" /></div>
+                <div><label class="lbl">INT</label><input id="cocINT" type="number" /></div>
               </div>
               <div class="grid2">
-                <div><label class="lbl">最大HP</label><input id="chMaxHP" type="number" /></div>
+                <div><label class="lbl">POW</label><input id="cocPOW" type="number" /></div>
+                <div><label class="lbl">APP</label><input id="cocAPP" type="number" /></div>
+                <div><label class="lbl">EDU</label><input id="cocEDU" type="number" /></div>
+                <div><label class="lbl">SIZ</label><input id="cocSIZ" type="number" /></div>
+              </div>
+              <div class="grid2">
+                <div><label class="lbl">LUCK</label><input id="cocLUCK" type="number" /></div>
                 <div>
-                  <label class="lbl">移动(步/回合)</label>
-                  <div class="dim">自动计算（由数值推导，无法手动设置）</div>
+                  <label class="lbl">派生</label>
+                  <div id="cocDerived" class="dim">HP = floor((CON+SIZ)/10)，MP = POW/5</div>
                 </div>
               </div>
-              <div class="grid2">
-                <div><label class="lbl">STR</label><input id="chSTR" type="number" /></div>
-                <div><label class="lbl">DEX</label><input id="chDEX" type="number" /></div>
-                <div><label class="lbl">CON</label><input id="chCON" type="number" /></div>
-                <div><label class="lbl">INT</label><input id="chINT" type="number" /></div>
+
+              <label class="lbl">技能（CoC 百分骰，0-100）</label>
+              <table class="tbl" id="chSkillsTable">
+                <thead><tr><th>技能</th><th>数值</th><th></th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <div class="toolbar-row">
+                <button id="btnAddSkill" class="sm">+ 新增技能</button>
               </div>
-              <!-- 技能/豁免熟练度设置已移除 -->
+
+              <label class="lbl">Terra</label>
+              <div class="grid2">
+                <div>
+                  <label class="lbl">感染（可选）</label>
+                  <div class="grid2">
+                    <div><label class="lbl">stage</label><input id="terraInfectStage" type="number" /></div>
+                    <div><label class="lbl">stress</label><input id="terraInfectStress" type="number" /></div>
+                    <div><label class="lbl">crystal_density</label><input id="terraCrystal" type="number" /></div>
+                  </div>
+                </div>
+                <div>
+                  <label class="lbl">防护</label>
+                  <div class="grid2">
+                    <div><label class="lbl">physical_armor</label><input id="terraArmor" type="number" /></div>
+                    <div><label class="lbl">arts_barrier</label><input id="terraBarrier" type="number" /></div>
+                  </div>
+                </div>
+              </div>
 
               <label class="lbl">携行物</label>
               <table class="tbl" id="chInvTable">
@@ -402,7 +436,7 @@
       <div id="cfgHint" class="dim">保存后需重启生效。</div>
     </div>
     <!-- Optional runtime config: allows pointing the frontend to a remote backend origin -->
-    <script src="config.js?v=91fb49e"></script>
-    <script src="app.js?v=91fb49e"></script>
+    <script src="config.js?v=3f134d5"></script>
+    <script src="app.js?v=3f134d5"></script>
   </body>
 </html>
