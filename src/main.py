@@ -116,7 +116,11 @@ DEFAULT_RECAP_MSG_LIMIT = 6
 DEFAULT_RECAP_ACTION_LIMIT = 6
 
 # System prompt building (tools list + templates)
-DEFAULT_TOOLS_TEXT = "perform_attack(), cast_arts(), advance_position(), use_entrance(), set_relation(), transfer_item(), set_protection(), clear_protection(), first_aid()"
+DEFAULT_TOOLS_TEXT = (
+    "perform_attack(), cast_arts(), advance_position(), use_entrance(), "
+    "set_relation(), transfer_item(), set_protection(), clear_protection(), "
+    "first_aid(), apply_exposure(), advance_infection_stage(), get_infection_state()"
+)
 
 # Enforce JSON-only replies mode. When enabled, agents must output exactly one
 # JSON object with the shape: {"speech": str, "actions": [{"tool": str, "args": dict}, ...]}.
@@ -144,7 +148,9 @@ DEFAULT_PROMPT_JSON_INSTRUCTIONS = (
     "- speech：1-2句中文对白；禁止括号旁白/系统提示；可留空（例如只行动）。\n"
     "- description：1-2句中文，用于合并表达想法/微动作/简短旁白。\n"
     "- actions：如无行动则为 []。如需行动，每个元素：\n"
-    "  * tool 取自：perform_attack, cast_arts, advance_position, use_entrance, set_relation, transfer_item, set_protection, clear_protection, first_aid；\n"
+    "  * tool 取自：perform_attack, cast_arts, advance_position, use_entrance, "
+    "set_relation, transfer_item, set_protection, clear_protection, first_aid, "
+    "apply_exposure, advance_infection_stage, get_infection_state；\n"
     "  * args 为严格 JSON（双引号）；必须包含简短 reason(≤30字)；\n"
     "  * 行动默认为由你自己执行，只需要选择目标（统一使用 target 字段），例如攻击/施法的目标、守护的被保护者等。\\n"
     "- 若要使用 use_entrance，请将 args.entrance 填为环境概要“入口”段落中显示的入口名称（如：\"仓棚南门\"）\n"
@@ -424,7 +430,9 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
     except Exception:
         _VALIDATED = {}
 
-    def perform_attack(
+    # Engine-facing implementations (not exposed directly to the model)
+
+    def _perform_attack_impl(
         attacker,
         defender,
         weapon: str,
@@ -479,7 +487,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         )
         return resp
 
-    def advance_position(name, target, reason: str = ""):
+    def _advance_position_impl(name, target, reason: str = ""):
         """Move towards target using available movement; no `steps` parameter exposed.
 
         - Delegates to world.move_towards(name, target) which auto-uses remaining
@@ -501,7 +509,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         )
         return resp
 
-    def use_entrance(*, entrance: str = "", reason: str = "", name: str = ""):
+    def _use_entrance_impl(*, entrance: str = "", reason: str = "", name: str = ""):
         """Use a scene entrance to switch scenes (implicit actor injected upstream).
 
         The world layer handles approaching the entrance (movement) and switching on arrival.
@@ -528,7 +536,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         )
         return resp
 
-    def set_relation(a, b, value, reason: str = ""):
+    def _set_relation_impl(a, b, value, reason: str = ""):
         # kept world API: world.set_relation, validated entry is still named 'adjust_relation' at world-level
         fn = _VALIDATED.get("adjust_relation") or (lambda **p: world.set_relation(**p))
         resp = fn(a=a, b=b, value=value, reason=reason or "")
@@ -543,7 +551,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         )
         return resp
 
-    def transfer_item(target, item, n: int = 1, reason: str = ""):
+    def _transfer_item_impl(target, item, n: int = 1, reason: str = ""):
         fn = _VALIDATED.get("transfer_item") or (lambda **p: world.grant_item(**p))
         resp = fn(target=target, item=item, n=n)
         meta = resp.metadata or {}
@@ -560,7 +568,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         )
         return resp
 
-    def set_protection(guardian: str, protectee: str, reason: str = ""):
+    def _set_protection_impl(guardian: str, protectee: str, reason: str = ""):
         fn = _VALIDATED.get("set_protection") or (lambda **p: world.set_guard(**p))
         resp = fn(guardian=guardian, protectee=protectee)
         meta = resp.metadata or {}
@@ -575,7 +583,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         _log_action(f"protect {guardian} -> {protectee} reason={reason_text}")
         return resp
 
-    def clear_protection(guardian: str = "", protectee: str = "", reason: str = ""):
+    def _clear_protection_impl(guardian: str = "", protectee: str = "", reason: str = ""):
         g = guardian if guardian else None
         p = protectee if protectee else None
         fn = _VALIDATED.get("clear_protection") or (
@@ -594,7 +602,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         _log_action(f"clear_protect guardian={g} protectee={p} reason={reason_text}")
         return resp
 
-    def first_aid(name: str, target: str, reason: str = ""):
+    def _first_aid_impl(name: str, target: str, reason: str = ""):
         fn = _VALIDATED.get("first_aid") or (lambda **p: world.first_aid(**p))
         resp = fn(name=name, target=target)
         meta = resp.metadata or {}
@@ -611,7 +619,7 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         )
         return resp
 
-    def cast_arts(attacker: str, art: str, target: str, reason: str = ""):
+    def _cast_arts_impl(attacker: str, art: str, target: str, reason: str = ""):
         fn = _VALIDATED.get("cast_arts") or (lambda **p: world.cast_arts(**p))
         # 不再接受/透传 mp_spent，由底层按术式规则自动结算
         kwargs = {"attacker": attacker, "art": art, "target": target}
@@ -630,6 +638,66 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         )
         return resp
 
+    # Model-facing stubs (for schema only; execution goes through tool_dispatch)
+
+    def perform_attack(target: str, weapon: str, reason: str = ""):
+        """攻击当前回合角色可及的目标。
+
+        args:
+          - target: 攻击的目标名字
+          - weapon: 使用的武器 ID
+          - reason: 简短理由（≤30字）
+        """
+        return None
+
+    def cast_arts(art: str, target: str, reason: str = ""):
+        """对目标施放术式。
+
+        args:
+          - art: 术式 ID
+          - target: 目标名字
+          - reason: 简短理由
+        """
+        return None
+
+    def advance_position(target, reason: str = ""):
+        """向目标点移动。
+
+        args:
+          - target: [x,y] 或 入口/角色/目标点名称
+          - reason: 简短理由
+        """
+        return None
+
+    def use_entrance(entrance: str = "", reason: str = ""):
+        """通过入口切换场景。
+
+        args:
+          - entrance: 入口名称（如“仓棚南门”）
+          - reason: 简短理由
+        """
+        return None
+
+    def set_relation(target: str, value, reason: str = ""):
+        """设置与你和目标之间的关系数值。"""
+        return None
+
+    def transfer_item(target: str, item: str, n: int = 1, reason: str = ""):
+        """向目标交付物品。"""
+        return None
+
+    def set_protection(target: str, reason: str = ""):
+        """守护某个目标。"""
+        return None
+
+    def clear_protection(target: str = "", reason: str = ""):
+        """取消守护。"""
+        return None
+
+    def first_aid(target: str, reason: str = ""):
+        """对目标进行急救。"""
+        return None
+
     tool_list: List[object] = [
         perform_attack,
         cast_arts,
@@ -642,17 +710,17 @@ def make_npc_actions(*, world: Any) -> Tuple[List[object], Dict[str, object]]:
         first_aid,
     ]
     tool_dispatch: Dict[str, object] = {
-        "perform_attack": perform_attack,
-        "cast_arts": cast_arts,
-        "advance_position": advance_position,
-        "use_entrance": use_entrance,
-        "set_relation": set_relation,
+        "perform_attack": _perform_attack_impl,
+        "cast_arts": _cast_arts_impl,
+        "advance_position": _advance_position_impl,
+        "use_entrance": _use_entrance_impl,
+        "set_relation": _set_relation_impl,
         # Back-compat: keep old name mapped to the same function (not advertised)
-        "adjust_relation": set_relation,
-        "transfer_item": transfer_item,
-        "set_protection": set_protection,
-        "clear_protection": clear_protection,
-        "first_aid": first_aid,
+        "adjust_relation": _set_relation_impl,
+        "transfer_item": _transfer_item_impl,
+        "set_protection": _set_protection_impl,
+        "clear_protection": _clear_protection_impl,
+        "first_aid": _first_aid_impl,
     }
 
     return tool_list, tool_dispatch
@@ -1005,6 +1073,10 @@ class _WorldPort:
     # participants and character meta helpers
     set_participants = staticmethod(world_impl.set_participants)
     set_character_meta = staticmethod(world_impl.set_character_meta)
+    # infection track helpers
+    get_infection_state = staticmethod(world_impl.get_infection_state)
+    apply_exposure = staticmethod(world_impl.apply_exposure)
+    advance_infection_stage = staticmethod(world_impl.advance_infection_stage)
     # visibility/rendering helpers (scoped environment)
     render_env_for = staticmethod(getattr(world_impl, "render_env_for", lambda *a, **k: None))
     visible_snapshot_for = staticmethod(
@@ -1303,37 +1375,44 @@ async def _execute_actions_from_json(
     def _normalize_action_params(tool: str, params: Dict[str, Any], actor: str) -> Dict[str, Any]:
         p = dict(params or {})
         t = str(tool)
-        # Unify target aliases and inject implicit actor
+        # Unify target aliases and ENFORCE implicit-actor semantics:
+        # 工具执行者始终为当前回合角色，而不是模型在 JSON 中传入的 name/attacker/guardian 等。
         if t == "perform_attack":
-            p.setdefault("attacker", actor)
+            # 攻击者必须是当前角色
+            p["attacker"] = actor
             if "defender" not in p and "target" in p:
                 p["defender"] = p.get("target")
             # drop alias to avoid unexpected kwargs downstream
             p.pop("target", None)
         elif t == "cast_arts":
-            p.setdefault("attacker", actor)
+            # 施术者必须是当前角色
+            p["attacker"] = actor
             # keep target as-is (required by world)
             p.pop("name", None)
         elif t == "advance_position":
-            p.setdefault("name", actor)
+            # 只能移动自己
+            p["name"] = actor
         elif t == "first_aid":
-            p.setdefault("name", actor)
+            # 急救者 = 当前角色
+            p["name"] = actor
         elif t == "use_entrance":
-            # Minimal entrance tool: implicit actor is injected here
-            p.setdefault("name", actor)
+            # 使用入口的一定是当前角色
+            p["name"] = actor
         elif t == "set_protection":
-            p.setdefault("guardian", actor)
+            # 守护的发起者 = 当前角色
+            p["guardian"] = actor
             if "protectee" not in p and "target" in p:
                 p["protectee"] = p.get("target")
             p.pop("target", None)
         elif t == "clear_protection":
-            # default to clearing self's guard on the target; keep broader forms explicit
-            p.setdefault("guardian", actor)
+            # 默认清理当前角色对目标的守护
+            p["guardian"] = actor
             if "protectee" not in p and "target" in p:
                 p["protectee"] = p.get("target")
             p.pop("target", None)
         elif t in ("set_relation", "adjust_relation"):
-            p.setdefault("a", actor)
+            # 关系调整的发起方 = 当前角色
+            p["a"] = actor
             if "b" not in p and "target" in p:
                 p["b"] = p.get("target")
             p.pop("target", None)

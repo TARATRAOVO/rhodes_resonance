@@ -501,6 +501,436 @@
       ],
       "initial_positions": {},
       "events": []
+    },
+    "003_coc_rhodes": {
+      "meta": {
+        "title": "深夜共振：罗德岛失衡",
+        "style": "克苏鲁风调查·明日方舟世界·多结局长篇"
+      },
+      "scenes": {
+        "ri_bridge": {
+          "name": "罗德岛·控制桥",
+          "details": [
+            "深夜值班的控制桥只留下几盏昏黄的工作灯，窗外是被雪与源石尘模糊的夜空。",
+            "通讯终端循环播放一段来自废城的求救录音，声音被低频嗡鸣与静电撕裂成断续的呢喃。",
+            "Amiya 站在沙盘前，耳廓轻颤，眼底有不祥的阴影，她反复确认信号源坐标，却发现数据每次都在微小偏移。"
+          ]
+        },
+        "ruined_district": {
+          "name": "废城外围·坍塌街区",
+          "details": [
+            "罗德岛的降落舱停在半毁的广场边缘，破碎的雕像被凝固的源石结晶刺穿。",
+            "远处断裂的高楼在风中发出令人不安的共振，仿佛有巨大的空洞在城市腹地缓慢呼吸。",
+            "地面上留下密集而杂乱的脚印，部分已经被新落的粉尘覆盖，看不清究竟是撤离，还是追逐。"
+          ]
+        },
+        "subway_tunnel": {
+          "name": "废弃地铁·下行隧道",
+          "details": [
+            "旧时代的地铁站牌被涂抹与刮擦，只能辨认出少数残缺的字母，它们在手电光下像是某种邪教的符号。",
+            "下行隧道内布满临时拉起的警戒线与罗德岛早前布置的标记，许多标记却被粗暴地抹去或扭曲。",
+            "越往下走，空气越潮湿，墙壁上的源石结晶开始以不自然的节律闪烁，与远处看不见的低吟同步。"
+          ]
+        },
+        "resonance_node": {
+          "name": "共振实验区·接引层",
+          "details": [
+            "这里原本是矿区的深部检修平台，如今被改造成用于研究“源石共振失衡”的临时实验区。",
+            "厚重的防爆门大敞四开，门上的警告涂料被剥落出指状抓痕，像是有人试图在门关闭时从内侧逃出。",
+            "多组仪器仍在运行，屏幕上显示的波形已经挤压成一条近乎纯黑的带状，偶尔跳出一闪而逝的尖锐脉冲。"
+          ]
+        },
+        "core_chamber": {
+          "name": "共振核心中枢",
+          "details": [
+            "环形大厅中央悬浮着一块巨大而扭曲的源石晶核，内部仿佛封印着倒映整座城市的深海，光线在其中折射成难以理解的几何。",
+            "石壁被古旧的咒式与现代记号混写覆盖，线条交叠成眩晕的网格，让目光在无意间被拖入某种重复的螺旋。",
+            "每一次脉冲式的共振都让空气像水一样起伏，感知与记忆在波峰间短暂错位，分不清刚才发生的究竟是回忆还是预兆。"
+          ]
+        },
+        "escape_platform": {
+          "name": "临时撤离平台",
+          "details": [
+            "改造自矿区货运升降井的临时平台悬在半空，下方是看不清深度的黑暗与散发微光的结晶碎屑。",
+            "罗德岛的升降舱在平台边缘待命，舱门半开，内部应急灯闪烁不定，仿佛也被远处的共鸣牵动。",
+            "风从裂开的岩壁间灌入，带来远处城市骨架坍塌时的低吼，与脚下金属结构的共振混在一起。"
+          ]
+        }
+      },
+      "entrances": {
+        "bridge_to_ruins": {
+          "label": "降落舱通道",
+          "from_scene": "ri_bridge",
+          "at": [
+            0,
+            2
+          ],
+          "to_scene": "ruined_district",
+          "spawn": [
+            0,
+            0
+          ],
+          "desc": "通过甲板升降通道，随第一批小队降落到废城外围。"
+        },
+        "ruins_to_tunnel": {
+          "label": "崩落入口",
+          "from_scene": "ruined_district",
+          "at": [
+            3,
+            -1
+          ],
+          "to_scene": "subway_tunnel",
+          "spawn": [
+            0,
+            -2
+          ],
+          "desc": "沿着被炸开的街角裂隙下行，进入废弃地铁隧道深处。"
+        },
+        "tunnel_to_node": {
+          "label": "下层防爆门",
+          "from_scene": "subway_tunnel",
+          "at": [
+            2,
+            -4
+          ],
+          "to_scene": "resonance_node",
+          "spawn": [
+            1,
+            -1
+          ],
+          "desc": "穿过扭曲变形的防爆门，步入深部共振实验区的接引层。"
+        },
+        "node_to_core": {
+          "label": "核心井门",
+          "from_scene": "resonance_node",
+          "at": [
+            4,
+            -2
+          ],
+          "to_scene": "core_chamber",
+          "spawn": [
+            0,
+            0
+          ],
+          "desc": "沿安全梯深入核心井，直面共振中枢。"
+        },
+        "node_to_escape": {
+          "label": "撤离升降机",
+          "from_scene": "resonance_node",
+          "at": [
+            -2,
+            0
+          ],
+          "to_scene": "escape_platform",
+          "spawn": [
+            0,
+            1
+          ],
+          "desc": "绕过核心井，通过备用升降机直接返回地表与罗德岛。"
+        },
+        "core_to_escape": {
+          "label": "应急升降机",
+          "from_scene": "core_chamber",
+          "at": [
+            -1,
+            1
+          ],
+          "to_scene": "escape_platform",
+          "spawn": [
+            0,
+            1
+          ],
+          "desc": "从核心中枢撤退，搭乘应急升降机前往临时撤离平台。"
+        }
+      },
+      "initial_scenes": {
+        "Doctor": "ri_bridge",
+        "Amiya": "ri_bridge",
+        "Mephisto": "resonance_node",
+        "Faust": "resonance_node"
+      },
+      "scene_positions": {
+        "ri_bridge": {
+          "Doctor": [
+            0,
+            0
+          ],
+          "Amiya": [
+            1,
+            0
+          ]
+        },
+        "ruined_district": {
+          "Doctor": [
+            0,
+            0
+          ],
+          "Amiya": [
+            1,
+            -1
+          ]
+        },
+        "subway_tunnel": {
+          "Doctor": [
+            0,
+            -2
+          ],
+          "Amiya": [
+            1,
+            -3
+          ]
+        },
+        "resonance_node": {
+          "Doctor": [
+            1,
+            -1
+          ],
+          "Amiya": [
+            0,
+            -1
+          ],
+          "Mephisto": [
+            6,
+            2
+          ],
+          "Faust": [
+            8,
+            3
+          ]
+        },
+        "core_chamber": {
+          "Doctor": [
+            0,
+            0
+          ],
+          "Amiya": [
+            1,
+            0
+          ]
+        },
+        "escape_platform": {
+          "Doctor": [
+            0,
+            1
+          ],
+          "Amiya": [
+            1,
+            1
+          ]
+        }
+      },
+      "scene": {
+        "name": "罗德岛·控制桥",
+        "details": [
+          "罗德岛在雪夜中缓缓调整航线，舰体轻微震荡，仿佛正朝某个看不见的低点滑落。",
+          "战术沙盘上标出的废城轮廓不断扭曲，边缘被灰色噪点吞噬，像是被什么东西一点点啃掉。",
+          "Amiya 把最后一份报告推到博士面前：信号源位于矿区深处的共振实验区，如果不查清原因，下一次共振的目标可能就是罗德岛本身。"
+        ],
+        "weather": "snow",
+        "time": "23:40",
+        "objectives": [
+          "追踪求救信号的源头",
+          "调查共振实验区的异常",
+          "想办法在灾难前封印或切断共振核心"
+        ],
+        "description": "一场看不见上限的源石共振正沿着地表与空域蔓延，罗德岛只是被波及的第一艘船。"
+      },
+      "endings": [
+        {
+          "id": "party_wiped",
+          "label": "共振吞没一切",
+          "outcome": "failure",
+          "priority": 100,
+          "when": {
+            "any": [
+              {
+                "actors_dead": {
+                  "names": [
+                    "Doctor"
+                  ],
+                  "require": "any"
+                }
+              },
+              {
+                "participants_alive_at_most": 0
+              }
+            ]
+          }
+        },
+        {
+          "id": "sealed_and_escaped",
+          "label": "封印核心·罗德岛存续",
+          "outcome": "success",
+          "priority": 90,
+          "when": {
+            "all": [
+              {
+                "location_is": "临时撤离平台"
+              },
+              {
+                "actors_alive": {
+                  "names": [
+                    "Doctor",
+                    "Amiya"
+                  ],
+                  "require": "all"
+                }
+              },
+              {
+                "hostiles_present": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "escaped_but_resonance_remains",
+          "label": "带伤撤离·共振仍在远处低语",
+          "outcome": "neutral",
+          "priority": 80,
+          "when": {
+            "all": [
+              {
+                "location_is": "临时撤离平台"
+              },
+              {
+                "actors_alive": {
+                  "names": [
+                    "Doctor",
+                    "Amiya"
+                  ],
+                  "require": "all"
+                }
+              },
+              {
+                "hostiles_present": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "amiya_sacrifice",
+          "label": "阿米娅献身·共鸣暂息",
+          "outcome": "neutral",
+          "priority": 75,
+          "when": {
+            "all": [
+              {
+                "location_is": "共振核心中枢"
+              },
+              {
+                "actors_dead": {
+                  "names": [
+                    "Amiya"
+                  ],
+                  "require": "any"
+                }
+              },
+              {
+                "actors_alive": {
+                  "names": [
+                    "Doctor"
+                  ],
+                  "require": "all"
+                }
+              },
+              {
+                "hostiles_present": false
+              }
+            ]
+          }
+        },
+        {
+          "id": "doctor_sacrifice",
+          "label": "博士坠入深渊·阿米娅带回真相",
+          "outcome": "neutral",
+          "priority": 70,
+          "when": {
+            "all": [
+              {
+                "location_is": "临时撤离平台"
+              },
+              {
+                "actors_dead": {
+                  "names": [
+                    "Doctor"
+                  ],
+                  "require": "any"
+                }
+              },
+              {
+                "actors_alive": {
+                  "names": [
+                    "Amiya"
+                  ],
+                  "require": "all"
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "resonance_overflows",
+          "label": "共振失控·整片废城沉入深渊",
+          "outcome": "failure",
+          "priority": 60,
+          "when": {
+            "all": [
+              {
+                "time_at_least": "00:30"
+              },
+              {
+                "hostiles_present": true
+              }
+            ]
+          }
+        },
+        {
+          "id": "lingering_echo",
+          "label": "理智尚存·低语常伴",
+          "outcome": "neutral",
+          "priority": 50,
+          "when": {
+            "all": [
+              {
+                "time_at_least": "00:20"
+              },
+              {
+                "actors_alive": {
+                  "names": [
+                    "Doctor",
+                    "Amiya"
+                  ],
+                  "require": "all"
+                }
+              },
+              {
+                "location_is": [
+                  "共振实验区·接引层",
+                  "共振核心中枢"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "initial_positions": {},
+      "events": [
+        {
+          "name": "信号再度失真",
+          "time_min": 1425,
+          "note": "通讯频道突然插入第二段求救录音，声音重叠成多个人同时说话的错位回声。"
+        },
+        {
+          "name": "远处城市骨架坍塌",
+          "time_min": 1440,
+          "note": "废城深处传来连锁坍塌的闷响，整片街区随之轻微下沉，尘雾在夜空中卷成一只缓慢张开的眼睛。"
+        },
+        {
+          "name": "共振进入第二阶段",
+          "time_min": 1460,
+          "note": "监测终端报告共振频谱突变，原本离散的波峰汇聚成有节律的心跳，任何靠近核心的源石构造体都开始以同样节奏脉动。"
+        }
+      ]
     }
   }
 }

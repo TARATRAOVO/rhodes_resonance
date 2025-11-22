@@ -2754,6 +2754,479 @@ def set_coc_character_from_config(name: str, coc: Dict[str, Any]) -> ToolRespons
     return res
 
 
+# ---- Oripathy / infection track (Terra-CoC glue) ----
+
+def _infection_stage_floor(stage: int) -> int:
+    """Return minimum stress value for a given infection stage."""
+    s = int(stage)
+    if s <= 0:
+        return 0
+    if s == 1:
+        return 20
+    if s == 2:
+        return 50
+    return 80
+
+
+def _ensure_infection_block(name: str) -> Dict[str, Any]:
+    """Return normalized infection block for `name`, creating defaults if needed."""
+    nm = str(name)
+    st = WORLD.characters.setdefault(nm, {})
+    coc = st.setdefault("coc", {})
+    terra = coc.setdefault("terra", {})
+    inf = terra.setdefault("infection", {})
+    try:
+        stage = max(0, min(3, int(inf.get("stage", 0))))
+    except Exception:
+        stage = 0
+    try:
+        stress = max(0, int(inf.get("stress", 0)))
+    except Exception:
+        stress = 0
+    try:
+        cd = max(0, int(inf.get("crystal_density", 0)))
+    except Exception:
+        cd = 0
+    # Clamp stress to current stage floor (doc: 普通恢复不会低于阶段下限)
+    floor = _infection_stage_floor(stage)
+    if stress < floor:
+        stress = floor
+    inf.update({"stage": stage, "stress": stress, "crystal_density": cd})
+    terra["infection"] = inf
+    coc["terra"] = terra
+    st["coc"] = coc
+    return inf
+
+
+def get_infection_state(name: str) -> ToolResponse:
+    """Return current infection track for `name`."""
+    nm = str(name)
+    inf = _ensure_infection_block(nm)
+    floor = _infection_stage_floor(int(inf.get("stage", 0)))
+    return ToolResponse(
+        content=[
+            TextBlock(
+                type="text",
+                text=(
+                    f"{nm} 感染轨道：阶段 {inf.get('stage', 0)}，应激 {inf.get('stress', 0)}"
+                    f"（阶段下限 {floor}），结晶密度 {inf.get('crystal_density', 0)}"
+                ),
+            )
+        ],
+        metadata={"ok": True, "name": nm, "infection": dict(inf), "stage_floor": floor},
+    )
+
+
+def _infection_resist_target(name: str, bonus: int = 0) -> Tuple[int, Dict[str, Any]]:
+    """Compute infection resist target for `name` and return (target, meta)."""
+    nm = str(name)
+    st = WORLD.characters.get(nm, {})
+    coc = dict((st or {}).get("coc") or {})
+    ch = {k.upper(): int(v) for k, v in (coc.get("characteristics") or {}).items()}
+    con_v = int(ch.get("CON", 50))
+    pow_v = int(ch.get("POW", 50))
+    half_sum = int(round((con_v + pow_v) / 2.0))
+    terra = dict(coc.get("terra") or {})
+    arts = dict(terra.get("arts") or {})
+    # Terra sheet value; fall back to skill default if absent
+    try:
+        arts_resist_sheet = int(arts.get("resist", 0))
+    except Exception:
+        arts_resist_sheet = 0
+    if arts_resist_sheet <= 0:
+        try:
+            arts_resist_sheet = int(_coc_skill_value(nm, "Arts_Resist"))
+        except Exception:
+            arts_resist_sheet = 40
+    base = max(arts_resist_sheet, half_sum)
+    inf = _ensure_infection_block(nm)
+    stage = int(inf.get("stage", 0))
+    stage_penalty = {0: 0, 1: 10, 2: 20, 3: 30}.get(stage, 0)
+    tgt = max(1, int(base + int(bonus) - stage_penalty))
+    meta = {
+        "con": con_v,
+        "pow": pow_v,
+        "half_con_pow": half_sum,
+        "arts_resist_sheet": arts_resist_sheet,
+        "base": base,
+        "bonus": int(bonus),
+        "stage": stage,
+        "stage_penalty": stage_penalty,
+        "target": tgt,
+    }
+    return tgt, meta
+
+
+def advance_infection_stage(name: str, choice: str = "auto") -> ToolResponse:
+    """Advance infection stage by 1 (up to 3) and apply long-term effects.
+
+    choice:
+      - 'con': 体能衰退，CON -5
+      - 'resist': 术式抗性下降，arts.resist -10
+      - 'affinity': 术式亲和上升，arts.affinity +5（并记标记供过载规则使用）
+      - 'auto': 当前实现中等同于 'con'
+    """
+    import math as _math
+
+    nm = str(name)
+    st = WORLD.characters.setdefault(nm, {})
+    coc = st.setdefault("coc", {})
+    terra = coc.setdefault("terra", {})
+    inf = _ensure_infection_block(nm)
+    old_stage = int(inf.get("stage", 0))
+    if old_stage >= 3:
+        return ToolResponse(
+            content=[TextBlock(type="text", text=f"{nm} 感染阶段已达 3（晚期），无法继续提升。")],
+            metadata={"ok": False, "name": nm, "stage": old_stage, "error_type": "stage_max"},
+        )
+    new_stage = min(3, old_stage + 1)
+    inf["stage"] = new_stage
+    inf["crystal_density"] = int(inf.get("crystal_density", 0)) + 1
+    floor = _infection_stage_floor(new_stage)
+    try:
+        cur_stress = int(inf.get("stress", 0))
+    except Exception:
+        cur_stress = 0
+    if cur_stress < floor:
+        cur_stress = floor
+    inf["stress"] = cur_stress
+    # Long-term effect
+    ch = {k.upper(): int(v) for k, v in (coc.get("characteristics") or {}).items()}
+    arts = dict(terra.get("arts") or {})
+    choice_norm = str(choice or "auto").lower()
+    if choice_norm not in ("con", "resist", "affinity"):
+        choice_norm = "con"
+    logs: List[TextBlock] = []
+    if choice_norm == "con":
+        old_con = int(ch.get("CON", 50))
+        new_con = max(1, old_con - 5)
+        ch["CON"] = new_con
+        logs.append(TextBlock(type="text", text=f"{nm} 体能衰退：CON {old_con} -> {new_con}"))
+    elif choice_norm == "resist":
+        try:
+            old_res = int(arts.get("resist", 40))
+        except Exception:
+            old_res = 40
+        new_res = max(0, old_res - 10)
+        arts["resist"] = new_res
+        logs.append(TextBlock(type="text", text=f"{nm} 术式抗性下降：arts.resist {old_res} -> {new_res}"))
+    else:  # affinity
+        try:
+            old_aff = int(arts.get("affinity", 0))
+        except Exception:
+            old_aff = 0
+        new_aff = old_aff + 5
+        arts["affinity"] = new_aff
+        # Flag for potential use by overcharge rules
+        inf["overcharge_step"] = int(inf.get("overcharge_step", 0)) + 1
+        logs.append(TextBlock(type="text", text=f"{nm} 术式亲和上升：arts.affinity {old_aff} -> {new_aff}（过载惩罚阶提升）"))
+    # Persist back
+    coc["characteristics"] = ch
+    terra["arts"] = arts
+    terra["infection"] = inf
+    coc["terra"] = terra
+    st["coc"] = coc
+    WORLD.characters[nm] = st
+    # Recompute derived HP / SAN / MP from new stats
+    try:
+        rec = recompute_coc_derived(nm)
+        rec_logs = [blk for blk in (rec.content or []) if isinstance(blk, dict) and blk.get("type") == "text"]
+    except Exception:
+        rec_logs = []
+    WORLD._touch()
+    head = TextBlock(
+        type="text",
+        text=f"{nm} 感染阶段提升：{old_stage} -> {new_stage}，结晶密度 {inf.get('crystal_density', 0)}，应激重置为阶段下限 {floor}",
+    )
+    return ToolResponse(
+        content=[head] + logs + rec_logs,
+        metadata={
+            "ok": True,
+            "name": nm,
+            "stage_before": old_stage,
+            "stage_after": new_stage,
+            "stress": cur_stress,
+            "crystal_density": inf.get("crystal_density", 0),
+            "choice": choice_norm,
+        },
+    )
+
+
+def apply_exposure(
+    name: str,
+    level: str = "light",
+    source: str = "",
+    *,
+    dice_expr: Optional[str] = None,
+    bonus: int = 0,
+) -> ToolResponse:
+    """Apply an Oripathy exposure to `name` following docs/coc_terra.md.
+
+    Parameters
+    ----------
+    name: 受暴露角色名称。
+    level: 暴露等级（轻/中/重/灾害 或 light/medium/heavy/disaster），仅在 dice_expr 为空时用于选取应激骰。
+    source: 文本来源说明（如 \"矿区塌方扬尘\"），仅用于日志。
+    dice_expr: 自定义应激骰表达式（如 \"1d6+1\"）。提供时优先于 level。
+    bonus: 总抗性加值（装备/去污/医学），直接加到目标值上。
+
+    流程
+    ----
+    1. 根据 level/dice_expr 掷应激骰。
+    2. 计算感染抗性目标值：max(arts.resist, round((CON+POW)/2)) + bonus - 阶段惩罚。
+    3. 掷 1d100 抗性检定：极难成功→本次应激 0；一般成功→应激减半；大失败→应激×1.5。
+    4. 增加 infection.stress，处理 20/50/80 阈值发作与 stage 进展（stress>100 或两次重度发作）。"""
+    import math as _math
+
+    nm = str(name)
+    inf_before = _ensure_infection_block(nm)
+    stage_before = int(inf_before.get("stage", 0))
+    stress_before = int(inf_before.get("stress", 0))
+
+    # 1) Determine stress dice
+    lvl = str(level or "light").lower()
+    expr = dice_expr
+    if not expr:
+        if lvl in ("light", "轻", "minor"):
+            expr = "1d4"
+        elif lvl in ("medium", "中", "moderate"):
+            expr = "1d6+1"
+        elif lvl in ("heavy", "重"):
+            expr = "2d6"
+        elif lvl in ("disaster", "灾害", "catastrophic"):
+            expr = "2d10"
+        else:
+            expr = "1"
+    roll_res = roll_dice(expr)
+    raw = int((roll_res.metadata or {}).get("total", 0))
+
+    # 2) Infection resist target
+    tgt, resist_meta = _infection_resist_target(nm, bonus=bonus)
+    roll = random.randint(1, 100)
+    t = max(1, int(tgt))
+    hard = max(1, t // 2)
+    extreme = max(1, t // 5)
+    if roll <= extreme:
+        level_str = "extreme"
+        success = True
+    elif roll <= hard:
+        level_str = "hard"
+        success = True
+    elif roll <= t:
+        level_str = "regular"
+        success = True
+    else:
+        level_str = "fail"
+        success = False
+    fumble = (not success) and roll >= 96
+    txt_check = f"感染抗性检定：{nm} d100={roll} / {t} -> {('成功['+level_str+']') if success else '失败'}"
+
+    # 3) Adjust stress by resist result
+    if raw <= 0:
+        adj = 0
+        factor = 0.0
+    else:
+        if success and level_str == "extreme":
+            adj = 0
+            factor = 0.0
+        else:
+            if success:
+                factor = 0.5
+            elif fumble:
+                factor = 1.5
+            else:
+                factor = 1.0
+            adj = int(_math.floor(raw * factor))
+            if adj <= 0 and factor > 0.0:
+                adj = 1
+
+    # 4) Apply to infection.stress and handle flares / stage advance
+    inf = _ensure_infection_block(nm)
+    try:
+        cur_stress = int(inf.get("stress", 0))
+    except Exception:
+        cur_stress = 0
+    stress_raw_after = cur_stress + max(0, adj)
+    inf["stress"] = stress_raw_after
+
+    logs: List[TextBlock] = []
+    # Show exposure source and dice
+    src_note = f"（来源：{source}）" if source else ""
+    logs.append(
+        TextBlock(
+            type="text",
+            text=f"{nm} 感染暴露：{expr} -> {raw} 点应激{src_note}",
+        )
+    )
+    logs.append(TextBlock(type="text", text=txt_check))
+    logs.append(
+        TextBlock(
+            type="text",
+            text=f"本次应激结算：基础 {raw}，系数 {factor:.1f} -> 实际 {adj}",
+        )
+    )
+
+    def _handle_flares(nm: str, before: int, after: int) -> Tuple[int, List[TextBlock], bool]:
+        """Process 20/50/80 thresholds; may advance stage via advance_infection_stage.
+
+        Returns (final_stress, logs, stage_advanced).
+        """
+        out_logs: List[TextBlock] = []
+        stage_advanced = False
+        thresholds = [(20, "mild"), (50, "moderate"), (80, "severe")]
+        inf_local = _ensure_infection_block(nm)
+        for th, kind in thresholds:
+            if before < th <= after:
+                if kind == "mild":
+                    # 轻度发作：以叙述为主，留给上层决定具体减值
+                    out_logs.append(
+                        TextBlock(
+                            type="text",
+                            text=f"{nm} 感染发作（轻度，阈值 20）：剧痛/咳血，持续约 1d10 分钟；建议物理/施术检定 −10（由 GM 裁定）。",
+                        )
+                    )
+                elif kind == "moderate":
+                    out_logs.append(
+                        TextBlock(
+                            type="text",
+                            text=(
+                                f"{nm} 感染发作（中度，阈值 50）：行动吃力，建议相关检定 −20，"
+                                "每轮 CON 困难检定决定行动受限；继续施术可额外承受 +1d4 应激（由 GM 决定是否触发）。"
+                            ),
+                        )
+                    )
+                else:  # severe
+                    # 记录严重发作次数供阶段进展使用
+                    try:
+                        inf_local["severe_flare_count"] = int(inf_local.get("severe_flare_count", 0)) + 1
+                    except Exception:
+                        inf_local["severe_flare_count"] = 1
+                    WORLD.characters[str(nm)]["coc"]["terra"]["infection"] = inf_local  # type: ignore[index]
+                    out_logs.append(
+                        TextBlock(
+                            type="text",
+                            text=(
+                                f"{nm} 感染发作（重度，阈值 80）：源石结晶剧烈活化，"
+                                "将进行 CON 极难检定与 POW 检定以判定后续伤害与眩晕。"
+                            ),
+                        )
+                    )
+                    # CON 极难检定：非极难视作失败
+                    con_chk = skill_check_coc(nm, "CON")
+                    for blk in (con_chk.content or []):
+                        if isinstance(blk, dict) and blk.get("type") == "text":
+                            out_logs.append(blk)
+                    con_meta = con_chk.metadata or {}
+                    con_level = str(con_meta.get("success_level", "fail"))
+                    if con_level != "extreme":
+                        dmg_roll = roll_dice("1d6")
+                        dmg_raw = int((dmg_roll.metadata or {}).get("total", 0))
+                        # arts_barrier 可对这次 HP 伤害减半（物理护甲无效）
+                        try:
+                            coc_d = dict(WORLD.characters.get(nm, {}).get("coc") or {})
+                            terra_d = dict(coc_d.get("terra") or {})
+                            prot = dict(terra_d.get("protection") or {})
+                            barrier = int(prot.get("arts_barrier", 0))
+                        except Exception:
+                            barrier = 0
+                        if barrier > 0:
+                            dmg = int(_math.ceil(dmg_raw / 2.0))
+                        else:
+                            dmg = dmg_raw
+                        out_logs.append(
+                            TextBlock(
+                                type="text",
+                                text=f"重度发作伤害：1d6 -> {dmg_raw}（术式护盾 {'减半' if barrier > 0 else '未减免'}），实际 HP 伤害 {dmg}",
+                            )
+                        )
+                        dmg_res = damage(nm, dmg)
+                        for blk in (dmg_res.content or []):
+                            if isinstance(blk, dict) and blk.get("type") == "text":
+                                out_logs.append(blk)
+                    # POW 检定：失败则眩晕 1d3 轮
+                    pow_chk = skill_check_coc(nm, "POW")
+                    for blk in (pow_chk.content or []):
+                        if isinstance(blk, dict) and blk.get("type") == "text":
+                            out_logs.append(blk)
+                    pow_meta = pow_chk.metadata or {}
+                    if not bool(pow_meta.get("success", False)):
+                        turns_roll = roll_dice("1d3")
+                        turns = int((turns_roll.metadata or {}).get("total", 1))
+                        turns = max(1, turns)
+                        out_logs.append(
+                            TextBlock(
+                                type="text",
+                                text=f"POW 检定失败：{nm} 眩晕 {turns} 轮（stunned），无法进行行动。",
+                            )
+                        )
+                        try:
+                            st_res = add_status(nm, "stunned", duration_rounds=turns, kind="control")
+                            for blk in (st_res.content or []):
+                                if isinstance(blk, dict) and blk.get("type") == "text":
+                                    out_logs.append(blk)
+                        except Exception:
+                            pass
+        # 阶段进展：stress>100 或两次重度发作
+        try:
+            severe_count = int(inf_local.get("severe_flare_count", 0))
+        except Exception:
+            severe_count = 0
+        stage_now = int(inf_local.get("stage", 0))
+        final_stress = after
+        if (after > 100 or severe_count >= 2) and stage_now < 3:
+            adv = advance_infection_stage(nm, choice="auto")
+            for blk in (adv.content or []):
+                if isinstance(blk, dict) and blk.get("type") == "text":
+                    out_logs.append(blk)
+            meta = adv.metadata or {}
+            stage_advanced = bool(meta.get("ok", False))
+            # 取更新后的应激值
+            inf2 = _ensure_infection_block(nm)
+            try:
+                final_stress = int(inf2.get("stress", final_stress))
+            except Exception:
+                pass
+            # 重置重度发作计数
+            try:
+                inf2["severe_flare_count"] = 0
+            except Exception:
+                pass
+            WORLD.characters[str(nm)]["coc"]["terra"]["infection"] = inf2  # type: ignore[index]
+        return final_stress, out_logs, stage_advanced
+
+    stress_after, flare_logs, stage_advanced = _handle_flares(nm, stress_before, stress_raw_after)
+    inf_final = _ensure_infection_block(nm)
+    inf_final["stress"] = stress_after
+    WORLD._touch()
+    logs.extend(flare_logs)
+
+    return ToolResponse(
+        content=logs,
+        metadata={
+            "ok": True,
+            "name": nm,
+            "source": source,
+            "level": lvl,
+            "stress_before": stress_before,
+            "stress_after": int(stress_after),
+            "stress_delta": max(0, int(stress_after - stress_before)),
+            "stage_before": stage_before,
+            "stage_after": int(inf_final.get("stage", stage_before)),
+            "crystal_density": int(inf_final.get("crystal_density", 0)),
+            "resist_roll": roll,
+            "resist_target": t,
+            "resist_success": bool(success),
+            "resist_level": level_str,
+            "resist_fumble": bool(fumble),
+            "resist_meta": resist_meta,
+            "exposure_expr": expr,
+            "raw_stress": raw,
+            "adjusted_stress": max(0, adj),
+            "stage_advanced": bool(stage_advanced),
+        },
+    )
+
+
 # DnD compatibility removed; use set_coc_character_from_config or set_coc_character directly.
 
 
@@ -3200,30 +3673,73 @@ def _attack_run_check_or_contest(
     *,
     skill_name: str,
     defense_skill_name: str,
+    attacker_value: Optional[int] = None,
+    defender_value: Optional[int] = None,
 ) -> tuple[bool, List[TextBlock], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
-    """Run opposed check (or single check if defender dying). Returns:
-    (success, logs, opposed_meta_or_none, attack_check_meta_or_none)
-    """
+    """Run opposed check (or single check if defender dying).
+
+    Returns: (success, logs, opposed_meta_or_none, attack_check_meta_or_none)
+
+    - When attacker_value/defender_value is None, use sheet skill values (contest()).
+    - When attacker_value is provided, perform an inline opposed check using that
+      value for attacker (used by过载施术一类的固定修正)。"""
     parts: List[TextBlock] = []
     oppose_meta: Optional[Dict[str, Any]] = None
     atk_check_meta: Optional[Dict[str, Any]] = None
+
+    # Defender dying: skip contest, only attack roll (with optional override)
     if _is_dying(defender):
         parts.append(TextBlock(type="text", text=f"对抗跳过：{defender} 濒死，本次仅进行命中检定"))
-        atk_res = skill_check_coc(attacker, skill_name)
+        if attacker_value is not None:
+            atk_res = skill_check_coc(attacker, skill_name, value=int(attacker_value))
+        else:
+            atk_res = skill_check_coc(attacker, skill_name)
         if atk_res.content:
             for blk in atk_res.content:
                 if isinstance(blk, dict) and blk.get("type") == "text":
                     parts.append(blk)
         atk_check_meta = dict(atk_res.metadata or {})
         return bool((atk_res.metadata or {}).get("success")), parts, None, atk_check_meta
-    # Opposed check
-    oppose = contest(attacker, skill_name, defender, defense_skill_name)
-    if oppose.content:
-        for blk in oppose.content:
-            if isinstance(blk, dict) and blk.get("type") == "text":
-                parts.append(blk)
-    oppose_meta = dict(oppose.metadata or {})
-    winner = (oppose.metadata or {}).get("winner")
+
+    # No overrides: delegate to generic contest() to keep behaviour identical
+    if attacker_value is None and defender_value is None:
+        oppose = contest(attacker, skill_name, defender, defense_skill_name)
+        if oppose.content:
+            for blk in oppose.content:
+                if isinstance(blk, dict) and blk.get("type") == "text":
+                    parts.append(blk)
+        oppose_meta = dict(oppose.metadata or {})
+        winner = (oppose.metadata or {}).get("winner")
+        return (winner == attacker), parts, oppose_meta, None
+
+    # Inline opposed check with explicit values (mirrors contest() semantics)
+    # Dying short-circuit for attacker kept minimal; defender-dying handled above.
+    if _is_dying(attacker) and not _is_dying(defender):
+        parts.append(TextBlock(type="text", text=f"对抗跳过：{attacker} 濒死，{defender} 自动胜"))
+        oppose_meta = {"winner": defender, "skip_reason": "attacker_dying"}
+        return False, parts, oppose_meta, None
+
+    ar = skill_check_coc(attacker, skill_name, value=int(attacker_value) if attacker_value is not None else None)
+    br = skill_check_coc(defender, defense_skill_name, value=int(defender_value) if defender_value is not None else None)
+    a_meta = ar.metadata or {}
+    b_meta = br.metadata or {}
+
+    def _lvl(m):
+        return {"extreme": 3, "hard": 2, "regular": 1, "fail": 0}.get(str(m.get("success_level", "fail")), 0)
+
+    la, lb = _lvl(a_meta), _lvl(b_meta)
+    if la != lb:
+        winner = attacker if la > lb else defender
+    else:
+        ra = int(a_meta.get("roll", 101) or 101)
+        rb = int(b_meta.get("roll", 101) or 101)
+        if ra != rb:
+            winner = attacker if ra < rb else defender
+        else:
+            winner = defender  # exact tie favors defender
+    txt = f"对抗：{attacker}({skill_name})[{a_meta.get('success_level','fail')}] vs {defender}({defense_skill_name})[{b_meta.get('success_level','fail')}] -> {winner} 胜"
+    parts.append(TextBlock(type="text", text=txt))
+    oppose_meta = {"a": a_meta, "b": b_meta, "winner": winner}
     return (winner == attacker), parts, oppose_meta, None
 
 
@@ -3742,7 +4258,10 @@ def cast_arts(attacker: str, art: str, target: Optional[str] = None, center: Opt
         except Exception:
             pass
 
-    # MP spending
+    # MP spending（支持“过载施术”分支）
+    mp_logs: List[TextBlock] = []
+    overcharge = False
+    atk_value_override: Optional[int] = None
     if mp_mode == "fixed":
         eff_spent = max(0, int(mp_cost))
     else:
@@ -3753,15 +4272,99 @@ def cast_arts(attacker: str, art: str, target: Optional[str] = None, center: Opt
         eff_spent = max(req, min(hard_max, want, cap))
     spent_res = spend_mp(attacker, eff_spent)
     if not (spent_res.metadata or {}).get("ok", False):
-        return spent_res
+        meta = spent_res.metadata or {}
+        err = str(meta.get("error_type") or "")
+        # 仅在 MP 不足且术式确有 MP 消耗时允许过载；否则维持原有失败行为
+        if err == "mp_insufficient" and mp_cost > 0:
+            overcharge = True
+            # 读当前 MP 与上限，执行“耗尽剩余 MP”并记录日志
+            st = WORLD.characters.setdefault(str(attacker), {})
+            try:
+                cur_mp = int(st.get("mp", 0))
+            except Exception:
+                cur_mp = 0
+            try:
+                cap_mp = int(st.get("max_mp", 0))
+            except Exception:
+                cap_mp = 0
+            if cur_mp > 0:
+                st["mp"] = 0
+                eff_spent = cur_mp
+                mp_logs.append(
+                    TextBlock(
+                        type="text",
+                        text=f"{attacker} MP 不足，强行过载施术，耗尽剩余 MP（0/{cap_mp or '?'}）。",
+                    )
+                )
+            else:
+                eff_spent = 0
+                mp_logs.append(
+                    TextBlock(
+                        type="text",
+                        text=f"{attacker} 在 MP 为 0 的状态下强行过载施术。",
+                    )
+                )
+            # 过载施术：本次攻击检定 −20（通过显式 value 覆盖实现）
+            try:
+                base_val = _coc_skill_value(attacker, cast_skill)
+            except Exception:
+                base_val = 0
+            atk_value_override = max(0, int(base_val) - 20)
+            if atk_value_override <= 0:
+                atk_value_override = 1
+            mp_logs.append(
+                TextBlock(
+                    type="text",
+                    text=f"过载惩罚：本次 {cast_skill} 检定视为在原值基础上 −20 进行。",
+                )
+            )
+            # 过载应激：基础 1d4，应随 overcharge_step 升档
+            over_expr = "1d4"
+
+            def _step_expr(expr: str) -> str:
+                e = expr.replace(" ", "")
+                if e == "1d4":
+                    return "1d6"
+                if e in ("1d6", "1d6+0"):
+                    return "1d6+1"
+                if e in ("1d6+1", "1d6+2"):
+                    return "2d6"
+                if e == "2d6":
+                    return "2d6+2"
+                return expr
+
+            try:
+                inf = _ensure_infection_block(attacker)
+                step = int(inf.get("overcharge_step", 0))
+            except Exception:
+                step = 0
+            for _ in range(max(0, step)):
+                over_expr = _step_expr(over_expr)
+            try:
+                exp_res = apply_exposure(
+                    attacker,
+                    level="light",
+                    source="术式过载",
+                    dice_expr=over_expr,
+                    bonus=0,
+                )
+                for blk in (exp_res.content or []):
+                    if isinstance(blk, dict) and blk.get("type") == "text":
+                        mp_logs.append(blk)
+            except Exception:
+                # 过载应激失败不阻断施术本体，仅不追加说明
+                pass
+        else:
+            return spent_res
 
     # Contest / check
-    parts: List[TextBlock] = list(pre_logs)
+    parts: List[TextBlock] = list(pre_logs) + mp_logs
     success, logs_check, oppose_meta, atk_check_meta = _attack_run_check_or_contest(
         attacker,
         tgt,
         skill_name=cast_skill,
         defense_skill_name=resist,
+        attacker_value=atk_value_override,
     )
     if logs_check:
         parts.extend(logs_check)
@@ -4317,6 +4920,23 @@ TOOL_SPECS: Dict[str, ToolSpec] = {
         actor_keys={"attacker", "target"},
         participants_policy="both",
     ),
+    "apply_exposure": ToolSpec(
+        required={"name"},
+        actor_keys={"name"},
+        numeric_min0={"bonus"},
+        participants_policy="source",
+        source_param="name",
+    ),
+    "advance_infection_stage": ToolSpec(
+        required={"name"},
+        actor_keys={"name"},
+        participants_policy="none",
+    ),
+    "get_infection_state": ToolSpec(
+        required={"name"},
+        actor_keys={"name"},
+        participants_policy="none",
+    ),
 }
 
 
@@ -4444,4 +5064,7 @@ def validated_tool_dispatch() -> Dict[str, Any]:
         "clear_protection": lambda **p: _validated_call("clear_protection", clear_guard, p),
         "first_aid": lambda **p: _validated_call("first_aid", first_aid, p),
         "cast_arts": lambda **p: _validated_call("cast_arts", cast_arts, p),
+        "apply_exposure": lambda **p: _validated_call("apply_exposure", apply_exposure, p),
+        "advance_infection_stage": lambda **p: _validated_call("advance_infection_stage", advance_infection_stage, p),
+        "get_infection_state": lambda **p: _validated_call("get_infection_state", get_infection_state, p),
     }
