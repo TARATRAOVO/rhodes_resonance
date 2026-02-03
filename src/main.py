@@ -3952,8 +3952,8 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     p.add_argument(
         "--cors",
-        default="",
-        help="Comma separated origins to allow CORS (empty means disabled)",
+        default="https://taratraovo.github.io",
+        help="Comma separated origins to allow CORS",
     )
     return p.parse_args(argv)
 
