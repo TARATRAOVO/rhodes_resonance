@@ -18,11 +18,11 @@ window.RR = window.RR || {};
     var host = (typeof location !== 'undefined') ? String(location.hostname || '').toLowerCase() : '';
     var isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(host);
     // Deployed backend default (used when not on localhost)
-    var REMOTE_DEFAULT = "https://inspector-aye-graphs-spend.trycloudflare.com";
+    var REMOTE_DEFAULT = "https://funk-encouraged-sprint-liz.trycloudflare.com";
     // Same-origin for local dev; remote default otherwise
     window.RR.backendOrigin = isLocal ? "" : REMOTE_DEFAULT;
   } catch (e) {
     // Fallback to previous deployed default if detection fails
-    window.RR.backendOrigin = "https://inspector-aye-graphs-spend.trycloudflare.com";
+    window.RR.backendOrigin = "https://funk-encouraged-sprint-liz.trycloudflare.com";
   }
 })();

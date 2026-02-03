@@ -137,14 +137,39 @@
   let __backendOverride = '';
   try {
     const p = new URLSearchParams(location.search);
+    const storageKey = 'rr_backend_origin';
     const b = String(p.get('backend') || '').trim();
-    if (b) __backendOverride = b.replace(/\/$/, '');
+    if (b) {
+      const cmd = b.toLowerCase();
+      if (cmd === 'clear' || cmd === 'reset') {
+        try { localStorage.removeItem(storageKey); } catch (e) { /* ignore */ }
+        __backendOverride = '';
+      } else {
+        // Only accept absolute http(s) origins.
+        try {
+          const u = new URL(b);
+          if (u.protocol === 'http:' || u.protocol === 'https:') {
+            __backendOverride = u.origin;
+            try { localStorage.setItem(storageKey, __backendOverride); } catch (e) { /* ignore */ }
+          }
+        } catch (e) { /* ignore */ }
+      }
+    } else {
+      try {
+        const saved = String(localStorage.getItem(storageKey) || '').trim();
+        if (saved) {
+          const u = new URL(saved);
+          if (u.protocol === 'http:' || u.protocol === 'https:') __backendOverride = u.origin;
+        }
+      } catch (e) { /* ignore */ }
+    }
   } catch (e) { /* ignore */ }
   const BACKEND_ORIGIN = (__backendOverride
     || (RR_CFG && typeof RR_CFG.backendOrigin === 'string' && RR_CFG.backendOrigin))
     ? (__backendOverride || RR_CFG.backendOrigin).replace(/\/$/, '')
     : '';
-  const BACKEND_URL = (BACKEND_ORIGIN ? new URL(BACKEND_ORIGIN) : null);
+  let BACKEND_URL = null;
+  try { BACKEND_URL = (BACKEND_ORIGIN ? new URL(BACKEND_ORIGIN) : null); } catch (e) { BACKEND_URL = null; }
   function withApiBase(path) {
     try {
       if (BACKEND_ORIGIN && typeof path === 'string' && path.startsWith('/')) return BACKEND_ORIGIN + path;
